@@ -1,7 +1,7 @@
 Package: timestralR
 Type: Package
 Title: Zero-Shot Probabilistic Forecasting with Timestral
-Version: 0.2.0
+Version: 0.3.0
 Authors@R: person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
     email = "sjansevanrensburg@gmail.com")
 Description: Runs Mistral AI's Timestral time-series foundation models from R
@@ -11,6 +11,7 @@ Description: Runs Mistral AI's Timestral time-series foundation models from R
     natively in R on top of R's BLAS.
 License: Apache License (>= 2)
 Encoding: UTF-8
-Imports: jsonlite, utils, tools, stats
+Imports: jsonlite, utils, tools, stats, Rcpp (>= 1.0.0)
+LinkingTo: Rcpp, RcppEigen
 SystemRequirements: None beyond R itself; model weights are downloaded on
     first use from huggingface.co (Mistral AI, Modified MIT licence).

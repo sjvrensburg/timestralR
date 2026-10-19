@@ -6,7 +6,7 @@ timestral_load(model = "5M", max_context = NULL,
   per_shot_horizon_patches = 32L, quantile_real_cap_k = 1e4,
   extreme_value_threshold = 1e30, revision = "main",
   cache_dir = tools::R_user_dir("timestralR", "cache"),
-  local_files_only = FALSE)
+  local_files_only = FALSE, backend = c("native", "R"))
 }
 \arguments{
 \item{model}{a size ("5M", "28M", "123M", "209M") to download/cache, or a
@@ -22,6 +22,9 @@ become 0}
 \item{revision}{Hub revision when \code{model} is a size}
 \item{cache_dir}{checkpoint cache directory when \code{model} is a size}
 \item{local_files_only}{only read from the cache, never download}
+\item{backend}{"native" (default) uses the compiled RcppEigen
+implementation of the transformer block; "R" uses the pure-R reference
+implementation. Results are identical up to floating-point order.}
 }
 \value{A \code{timestral_model} object.}
 \description{Load a Timestral model from the official Mistral AI checkpoint.}

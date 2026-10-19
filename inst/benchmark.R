@@ -2,7 +2,9 @@
 ## TIMESTRALR_MODEL_DIR selects the checkpoint; run per size.
 library(timestralR)
 model_dir <- Sys.getenv("TIMESTRALR_MODEL_DIR", "/tmp/timestral-5m")
-m <- timestral_load(model_dir, max_context = 4096L)
+backend <- Sys.getenv("TIMESTRALR_BACKEND", "native")
+cat("backend:", backend, "\n")
+m <- timestral_load(model_dir, max_context = 4096L, backend = backend)
 set.seed(42); n <- 700; tt <- 1:n
 y1 <- 50 + 10 * sin(2 * pi * tt / 24) + cumsum(rnorm(n)); y1[c(5:40, 300, 301, 650)] <- NA
 cases <- list(

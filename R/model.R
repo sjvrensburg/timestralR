@@ -317,6 +317,13 @@
 .predict_block <- function(model, inputs, observed, horizon_patches,
                            role_ids = NULL, known_future = NULL,
                            known_future_mask = NULL, groups = NULL) {
+  if (!is.null(model$session)) {
+    return(.ts_predict_block(model$session, inputs, observed,
+                             as.integer(horizon_patches),
+                             if (is.null(role_ids)) NULL else as.integer(role_ids),
+                             known_future, known_future_mask,
+                             if (is.null(groups)) NULL else as.integer(groups)))
+  }
   if (horizon_patches < 1)
     stop("horizon_patches must be >= 1, got ", horizon_patches)
   if (is.null(role_ids) || !model$config$covariate_enabled || all(role_ids == 0L))

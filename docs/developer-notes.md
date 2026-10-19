@@ -20,11 +20,31 @@ golden fixtures.
   `target_idx`, and padded `known_future`/`known_future_mask`.
 - `.predict_block(model, inputs, observed, horizon_patches, role_ids,
   known_future, known_future_mask, groups)` returns `(R, horizon_steps, Q)`
-  raw-space quantiles for one decode block. This is the function a native
-  kernel replaces; everything above it (assembly, refinement, capping,
-  mirroring, clipping) stays in R.
+  raw-space quantiles for one decode block. Everything above it
+  (assembly, refinement, capping, mirroring, clipping) stays in R.
 - Golden fixtures in `tests/fixtures/` (tiny random checkpoint + official
   outputs) pin this contract without Python or downloads.
+
+## Native backend (implemented)
+
+`src/timestral_eigen.cpp` implements `.predict_block` with RcppEigen
+(float64, weights held as row-major Eigen matrices in an external-pointer
+session built once by `.ts_load`). `.predict_block` dispatches on
+`model$session`; `backend = "R"` in `timestral_load()` keeps the pure-R
+reference. Matrix products in the native code are hybrid: at >= 4e6
+flops they route to the system BLAS via `dgemm` (FlexiBLAS/OpenBLAS
+here), below that Eigen's own kernels are used. The threshold was tuned
+by benchmark (5e5 was slower on 209M, 2e7 a wash) — a tuned BLAS is not
+always better, particularly on the many medium products in attention.
+
+Benchmarks (`inst/benchmark.R`, this machine):
+
+| size | backend | univariate | long horizon | context cap | batch 10 |
+|---|---|---|---|---|---|
+| 5M | R | 0.05 s | 0.24 s | 0.81 s | 0.29 s |
+| 5M | native | 0.02 s | 0.06 s | 0.22 s | 0.17 s |
+| 209M | R | 1.20 s | 3.73 s | 14.2 s | 7.8 s |
+| 209M | native | 0.57 s | 1.70 s | 6.4 s | 4.6 s |
 
 ## Parity summary (official PyTorch, torch 2.14.1, fp32)
 
@@ -36,16 +56,6 @@ knobs): worst `max_rel` 2.0e-6 on 5M (gate: < 2e-5). 123M: 9.6e-6, 209M:
 no gates, no asinh, alternate schedules) in `inst/synthetic_parity.R`:
 < 2.3e-7.
 
-## Benchmarks (this machine, 2 threads, context cap 4096)
-
-`inst/benchmark.R`:
-
-| size | univariate (h=96) | long horizon (h=1100) | context cap (h=2100) | batch of 10 |
-|---|---|---|---|---|
-| 5M | 0.05 s | 0.20 s | 0.80 s | 0.31 s |
-| 209M | 1.15 s | 3.56 s | 13.81 s | 7.82 s |
-
-Profiling note for the port: time is dominated by the per-row/per-head
-attention loops and the transformer linears in `R/model.R`; the Welford
-refinement (`R/forecaster.R`) and scaler (`R/scaler.R`) are minor. Port
-`.predict_block` internals first.
+Remaining profiling note: inside the native block, attention score/softmax
+loops are the next target if more speed is needed; the R-side refinement
+(`R/forecaster.R`) and scaler are minor.

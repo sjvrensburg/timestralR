@@ -1,3 +1,15 @@
+# timestralR 0.3.0
+
+- Native RcppEigen backend (default, `backend = "native"` in
+  `timestral_load()`): the single-block transformer primitive runs in
+  C++ with Eigen, with large products routed to the system BLAS and
+  small ones kept in Eigen (threshold tuned by benchmark; the tuned
+  BLAS is not always faster). The pure-R implementation remains as
+  `backend = "R"`, the reference and fallback. Results agree to < 1e-10
+  on the golden fixtures; official parity is unchanged.
+- Speed on this machine: 209M long-context case 13.8 s (R) -> 6.4 s
+  (native); 5M 0.80 s -> 0.22 s.
+
 # timestralR 0.2.0
 
 - Complete parity with the Python `timestral` package: batched series
