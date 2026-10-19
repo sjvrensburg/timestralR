@@ -94,13 +94,15 @@
 #' The result is a `tsibble` over the forecast horizon with one row per
 #' series/variate/step and one column per quantile level (as in
 #' [as_forecast_df()]). Registered as an S3 method for
-#' `tsibble::as_tsibble()` when the tsibble package is available; call it
+#' `tsibble::as_tsibble()` when the tsibble package is loaded; call it
 #' as `tsibble::as_tsibble(fc)`. The index column keeps the name of the
 #' input tsibble's index, and is `index` otherwise, as
 #' `tsibble::as_tsibble()` names it for `ts`, `zoo` and `xts`. Forecasts
 #' from `ts` input use the same index class (`yearmonth`, `yearquarter`,
 #' ...) that `tsibble::as_tsibble()` gives the `ts`, so they join with the
-#' observed data.
+#' observed data. Forecasts can also be created directly from a tsibble:
+#' in [timestral_forecast()], tsibble keys become the batch and measured
+#' variables the jointly forecast variates.
 #'
 #' @param x a `timestral_forecast` created from indexed input (`ts`,
 #'   `zoo`, `xts` or `tsibble`), so a future time index is available
@@ -112,6 +114,7 @@
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' tsibble::as_tsibble(fc)
 #' }
+#' @exportS3Method tsibble::as_tsibble
 as_tsibble.timestral_forecast <- function(x, ...) {
   if (is.null(x$future_index))
     stop("this forecast has no time index; create it from ts, zoo, xts ",

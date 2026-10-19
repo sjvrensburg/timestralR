@@ -1,7 +1,7 @@
 ## fable interface (fabletools/distributional are Suggests-only; the
 ## TIMESTRAL model definition talks to fabletools at call time, and the
-## forecast/model_sum S3 methods are registered in .onLoad when
-## fabletools is available).
+## forecast/model_sum S3 methods are registered (delayed S3method() in
+## NAMESPACE) when fabletools is loaded).
 
 ## Fitted fable models hold a small handle (checkpoint directory and load
 ## settings) rather than the timestral_model itself, so a mable does not
@@ -49,7 +49,9 @@
 #' `fabletools::model()` on a `tsibble`. The response is univariate (use
 #' [timestral_forecast()] directly for jointly forecast multiple
 #' variates); keys in the tsibble are handled by fable as usual, with the
-#' model trained (context captured) independently per key.
+#' model trained (context captured) independently per key. Requires the
+#' fabletools package (and fable for the usual workflow); forecasts are
+#' reported as 21-quantile distributions.
 #'
 #' @param formula the response formula, as in other fable models, e.g.
 #'   `TIMESTRAL(value)`
@@ -95,7 +97,8 @@ TIMESTRAL <- function(formula, model, symmetric = TRUE,
     .train_timestral(.data, handle, symmetric, clip_nonnegative)
 }
 
-## Registered for fabletools::forecast when fabletools is available.
+## Registered for fabletools::forecast when fabletools is loaded.
+#' @exportS3Method fabletools::forecast
 forecast.model_timestral <- function(object, new_data, specials = NULL,
                                      bootstrap = FALSE, times = 5000, ...) {
   if (!requireNamespace("distributional", quietly = TRUE))
@@ -114,20 +117,23 @@ forecast.model_timestral <- function(object, new_data, specials = NULL,
   out
 }
 
-## Registered for fabletools::model_sum when fabletools is available.
+## Registered for fabletools::model_sum when fabletools is loaded.
+#' @exportS3Method fabletools::model_sum
 model_sum.model_timestral <- function(x) "TIMESTRAL"
 
 #' Convert a Timestral forecast to a fable forecast table
 #'
 #' Registered as an S3 method for `fabletools::as_fable()` when fabletools
-#' is available; call it as `fabletools::as_fable(fc)`. The distribution
+#' is loaded; call it as `fabletools::as_fable(fc)`. The distribution
 #' column is the 21-quantile [distributional::dist_quantile()]
 #' distribution from the forecast. A univariate forecast uses the variate
 #' name as the response; a fable holds a single distribution column, so a
 #' multivariate forecast becomes a `variate` key with the response in a
 #' `value` column. Forecasts from `ts` input use the same index class
 #' (`yearmonth`, `yearquarter`, ...) as `tsibble::as_tsibble()` gives the
-#' `ts`, so they join with and score against the observed data.
+#' `ts`, so they join with and score against the observed data, and fable
+#' accuracy measures and interval extraction apply. See [TIMESTRAL()] for
+#' using Timestral directly as a fable model.
 #'
 #' @param x a `timestral_forecast` created from indexed input (`ts`,
 #'   `zoo`, `xts` or `tsibble`), so a future time index is available
@@ -139,6 +145,7 @@ model_sum.model_timestral <- function(x) "TIMESTRAL"
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' fabletools::as_fable(fc)
 #' }
+#' @exportS3Method fabletools::as_fable
 as_fable.timestral_forecast <- function(x, ...) {
   if (is.null(x$future_index))
     stop("this forecast has no time index; create it from ts, zoo, xts ",

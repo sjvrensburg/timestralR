@@ -1,6 +1,6 @@
 ## ggplot2 plotting (ggplot2 is a Suggests-only dependency; these methods
-## are registered for ggplot2::autoplot/autolayer in .onLoad when ggplot2
-## is available).
+## are registered for ggplot2::autoplot/autolayer, via delayed S3method()
+## in NAMESPACE, when ggplot2 is loaded).
 utils::globalVariables(".data")
 
 ## Long-format band/median/history data for one series of a forecast.
@@ -47,7 +47,7 @@ utils::globalVariables(".data")
 #' ggplot2 fan chart of a Timestral forecast
 #'
 #' Registered as S3 methods for `ggplot2::autoplot()` and
-#' `ggplot2::autolayer()` when ggplot2 is available. `autoplot` draws the
+#' `ggplot2::autolayer()` when ggplot2 is loaded. `autoplot` draws the
 #' observed history, the median, and nested predictive interval bands;
 #' `autolayer` adds just the forecast bands and median to an existing
 #' ggplot (for example of the observed series).
@@ -64,6 +64,7 @@ utils::globalVariables(".data")
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' ggplot2::autoplot(fc)
 #' }
+#' @exportS3Method ggplot2::autoplot
 autoplot.timestral_forecast <- function(object, series = 1L,
                                         levels = c(0.5, 0.8, 0.9, 0.98),
                                         ...) {
@@ -81,6 +82,7 @@ autoplot.timestral_forecast <- function(object, series = 1L,
 }
 
 #' @rdname autoplot.timestral_forecast
+#' @exportS3Method ggplot2::autolayer
 autolayer.timestral_forecast <- function(object, series = 1L,
                                          levels = c(0.5, 0.8, 0.9, 0.98),
                                          ...) {

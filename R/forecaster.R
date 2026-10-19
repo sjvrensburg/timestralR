@@ -384,6 +384,8 @@
 
 #' Forecast one or more series
 #'
+#' Zero-shot probabilistic forecast with 21 quantiles per step.
+#'
 #' @param model a `timestral_model`
 #' @param y numeric vector, `ts`/`mts`, `zoo`/`xts` (index preserved), a
 #'   `tsibble` (keys become the batch, measured variables the jointly
@@ -417,6 +419,32 @@
 #'   and the context `index` and `future_index` when `y` carried a time
 #'   index (`ts`, `zoo`, `xts`); the future index extends the last observed
 #'   interval.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#'
+#' ## univariate ts: index preserved, fan chart and ts accessors work
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' plot(fc)
+#' timestral_median(fc)
+#'
+#' ## multivariate: columns of y are forecast jointly
+#' fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
+#'
+#' ## zoo/xts inputs keep their time index (needs the zoo package)
+#' if (requireNamespace("zoo", quietly = TRUE)) {
+#'   yz <- zoo::zoo(AirPassengers,
+#'                  order.by = as.Date(time(AirPassengers)))
+#'   fc3 <- timestral_forecast(m, yz, h = 24)
+#'   head(as_forecast_df(fc3))   # time column holds Dates
+#' }
+#'
+#' ## tsibble input: keys become the batch (needs the tsibble package)
+#' if (requireNamespace("tsibble", quietly = TRUE)) {
+#'   fc4 <- timestral_forecast(m, tsibble::as_tsibble(AirPassengers), h = 24)
+#'   tsibble::as_tsibble(fc4)
+#' }
+#' }
 #' @export
 timestral_forecast <- function(model, y, h, observation_mask = NULL,
                                past_covariates = NULL, known_covariates = NULL,
@@ -520,20 +548,37 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
 }
 
 #' Median forecast
+#'
 #' @param fc a `timestral_forecast`
 #' @return The 0.5-quantile slice. For a single series forecast from a
 #'   `ts`, a `ts`/`mts` starting after the context; otherwise the same
 #'   slice of the quantiles array as before.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' timestral_median(fc)   # a ts, starting Jan 1961
+#' }
 #' @export
 timestral_median <- function(fc) {
   .maybe_ts(fc, .level_slice(fc, which(fc$levels == 0.5)))
 }
 
 #' Forecast at one quantile level
+#'
+#' Forecast at one quantile level; errors if `level` is not one of the
+#' model's quantile levels.
+#'
 #' @param fc a `timestral_forecast`
 #' @param level one of `timestral_levels()`
 #' @return The requested quantile slice, as a `ts`/`mts` for a single
 #'   series forecast from a `ts`, otherwise an array slice.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' timestral_quantile(fc, 0.9)
+#' }
 #' @export
 timestral_quantile <- function(fc, level) {
   if (length(level) != 1 || !level %in% fc$levels)
@@ -556,8 +601,19 @@ print.timestral_forecast <- function(x, ...) {
   invisible(x)
 }
 
-#' Long data frame: variate, step, (time,) and one column per quantile level
+#' Forecast as a long data frame
+#'
+#' Long data frame: variate, step, (time,) and one column per quantile level.
+#'
 #' @param fc a `timestral_forecast`
+#' @return A data frame with variate, step, optional time, and one column
+#'   per quantile level (plus a series column for a batch).
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' head(as_forecast_df(fc))
+#' }
 #' @export
 as_forecast_df <- function(fc) {
   q <- fc$quantiles

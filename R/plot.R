@@ -33,6 +33,10 @@
 
 #' Fan-chart plot of a Timestral forecast
 #'
+#' Draws the observed context, the median forecast, and nested central
+#' predictive interval bands (widest lightest) per variate. Uses the
+#' stored time index when the forecast input carried one.
+#'
 #' @param x a `timestral_forecast`
 #' @param series which series of a batch to plot (default 1)
 #' @param levels central predictive intervals to draw as bands; each must
