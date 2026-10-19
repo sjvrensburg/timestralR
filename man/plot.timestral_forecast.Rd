@@ -1,0 +1,29 @@
+\name{plot.timestral_forecast}
+\alias{plot.timestral_forecast}
+\title{Fan-chart plot of a Timestral forecast}
+\usage{
+\method{plot}{timestral_forecast}(x, series = 1L,
+  levels = c(0.5, 0.8, 0.9, 0.98), main = NULL, xlab = "Time",
+  ylab = NULL, ...)
+}
+\arguments{
+\item{x}{a \code{timestral_forecast}}
+\item{series}{which series of a batch to plot (default 1)}
+\item{levels}{central predictive intervals to draw as bands; each must
+correspond to a pair of available quantile knots (with the default knots,
+0.5, 0.8, 0.9 and 0.98 all do)}
+\item{main}{panel titles; default uses the variate names}
+\item{xlab, ylab}{axis labels}
+\item{...}{passed to \code{\link[graphics]{plot}}}
+}
+\value{\code{x}, invisibly.}
+\description{Draws the observed context, the median forecast, and nested
+central predictive interval bands (widest lightest) per variate. Uses the
+stored time index when the forecast input carried one.}
+\examples{
+\dontrun{
+m <- timestral_load("5M")
+fc <- timestral_forecast(m, AirPassengers, h = 24)
+plot(fc)
+}
+}

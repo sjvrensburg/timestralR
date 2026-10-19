@@ -9,10 +9,14 @@ timestral_forecast(model, y, h, observation_mask = NULL,
 }
 \arguments{
 \item{model}{a \code{timestral_model}}
-\item{y}{numeric vector, \code{ts}, matrix/data frame with time in rows and one
-column per target variate, a 3-D array (time, variate, series), or a list of
-per-series vectors/matrices (NA = missing). Variates of a series are forecast
-jointly; series in a batch are forecast independently in one call.}
+\item{y}{numeric vector, \code{ts}/\code{mts}, \code{zoo}/\code{xts} (index
+preserved), matrix or data frame with time in rows and one column per target
+variate, a 3-D array (time, variate, series), or a list of per-series
+vectors/matrices (NA = missing). Variates of a series are forecast jointly;
+series in a batch are forecast independently in one call. Covariates may also
+be \code{ts}/\code{zoo}/\code{xts}; when both \code{y} and a covariate carry a
+time index, the covariate index must align with the context (and future)
+index of \code{y}.}
 \item{h}{horizon in steps}
 \item{observation_mask}{optional logical shaped like \code{y}; FALSE marks
 additional missing values}
@@ -26,5 +30,30 @@ target-encoded per series (used as-is when a series has several target variates)
 \item{clip_nonnegative}{clip at 0 when every observed target value is >= 0}
 }
 \value{A \code{timestral_forecast}: for one series, \code{quantiles} is a
-(variate, horizon, level) array; for a batch, (series, variate, horizon, level).}
+(variate, horizon, level) array; for a batch, (series, variate, horizon,
+level). Also holds the \code{observed} context values (with NA for missing),
+and the context \code{index} and \code{future_index} when \code{y} carried a
+time index (\code{ts}, \code{zoo}, \code{xts}); the future index extends the
+last observed interval.}
 \description{Zero-shot probabilistic forecast with 21 quantiles per step.}
+\examples{
+\dontrun{
+m <- timestral_load("5M")
+
+## univariate ts: index preserved, fan chart and ts accessors work
+fc <- timestral_forecast(m, AirPassengers, h = 24)
+plot(fc)
+timestral_median(fc)
+
+## multivariate: columns of y are forecast jointly
+fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
+
+## zoo/xts inputs keep their time index (needs the zoo package)
+if (requireNamespace("zoo", quietly = TRUE)) {
+  yz <- zoo::zoo(AirPassengers,
+                 order.by = as.Date(time(AirPassengers)))
+  fc3 <- timestral_forecast(m, yz, h = 24)
+  head(as_forecast_df(fc3))   # time column holds Dates
+}
+}
+}

@@ -98,6 +98,49 @@ stopifnot(all(is.finite(fcc$quantiles)))
 om <- rep(TRUE, length(y)); om[20:30] <- FALSE
 fcm <- timestral_forecast(m, y, h = 24, observation_mask = om)
 stopifnot(all(is.finite(fcm$quantiles)))
+
+## ts input: index preserved, accessors return ts, plot runs
+y_ts <- stats::ts(y, start = c(2020, 1), frequency = 12)
+fc_ts <- timestral_forecast(m, y_ts, h = 24)
+stopifnot(isTRUE(all.equal(fc_ts$index, as.numeric(stats::time(y_ts)))))
+stopifnot(abs(fc_ts$future_index[1] - (fc_ts$tsp[2] + 1 / 12)) < 1e-8)
+med_ts <- timestral_median(fc_ts)
+stopifnot(stats::is.ts(med_ts), stats::frequency(med_ts) == 12)
+stopifnot(abs(as.numeric(stats::time(med_ts))[1] -
+              (fc_ts$tsp[2] + 1 / 12)) < 1e-8)
+stopifnot(max(abs(as.numeric(med_ts) -
+                  fc_ts$quantiles[1, , "0.50"])) < 1e-12)
+grDevices::pdf(NULL)
+plot(fc_ts)
+plot(fc)
+grDevices::dev.off()
+
+## zoo/xts input (optional packages): index and future index preserved,
+## misaligned covariate indexes are rejected
+if (requireNamespace("zoo", quietly = TRUE)) {
+  idx <- as.Date("2021-01-01") + 0:(length(y) - 1)
+  yz <- zoo::zoo(y, order.by = idx)
+  fc_z <- timestral_forecast(m, yz, h = 12)
+  stopifnot(identical(fc_z$index, idx))
+  stopifnot(identical(fc_z$future_index, idx[length(idx)] + 1:12))
+  dfz <- as_forecast_df(fc_z)
+  stopifnot(inherits(dfz$time, "Date"), dfz$time[1] == idx[length(idx)] + 1)
+  pz <- zoo::zoo(matrix(seq_along(y), ncol = 1), order.by = idx)
+  fc_zc <- timestral_forecast(m, yz, h = 12, past_covariates = pz)
+  stopifnot(all(is.finite(fc_zc$quantiles)))
+  pz_bad <- zoo::zoo(matrix(seq_along(y), ncol = 1), order.by = idx + 1)
+  err <- tryCatch({
+    timestral_forecast(m, yz, h = 12, past_covariates = pz_bad); FALSE
+  }, error = function(e) grepl("align", conditionMessage(e)))
+  stopifnot(isTRUE(err))
+  grDevices::pdf(NULL); plot(fc_z); grDevices::dev.off()
+}
+if (requireNamespace("xts", quietly = TRUE)) {
+  idx <- as.Date("2021-01-01") + 0:(length(y) - 1)
+  yx <- xts::xts(y, order.by = idx)
+  fc_x <- timestral_forecast(m, yx, h = 12)
+  stopifnot(identical(fc_x$future_index, idx[length(idx)] + 1:12))
+}
 cat("fixture tests passed\n")
 
 ## optional full checkpoint
