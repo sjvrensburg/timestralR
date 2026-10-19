@@ -316,19 +316,27 @@ MaskM obs_per_patch(const MaskMat& observed, int ps) {
 
 // ---- transformer (layers.py) -------------------------------------------------
 
-MatrixXd softmax_rows(MatrixXd scores, const MaskM* mask) {
+// Convert an integer mask to an additive attention bias (0 / -1e30),
+// once per call instead of per head per layer.
+MatrixXd mask_to_bias(const MaskM& m) {
+  MatrixXd b(m.rows(), m.cols());
+  for (int i = 0; i < m.rows(); ++i)
+    for (int j = 0; j < m.cols(); ++j) b(i, j) = m(i, j) ? 0.0 : -1e30;
+  return b;
+}
+
+// Row softmax with an optional additive bias, fused: bias added in one
+// vectorised pass, then a single exp/sum pass per row.
+MatrixXd softmax_bias(MatrixXd scores, const MatrixXd* bias) {
+  if (bias) scores += *bias;
   for (int i = 0; i < scores.rows(); ++i) {
-    double mx = -1e30;
-    for (int j = 0; j < scores.cols(); ++j) {
-      if (mask && !(*mask)(i, j)) scores(i, j) = -1e30;
-      mx = std::max(mx, scores(i, j));
-    }
+    double mx = scores.row(i).maxCoeff();
     double sum = 0;
     for (int j = 0; j < scores.cols(); ++j) {
       scores(i, j) = std::exp(scores(i, j) - mx);
       sum += scores(i, j);
     }
-    scores.row(i) /= sum;
+    scores.row(i) *= (1.0 / sum);
   }
   return scores;
 }
@@ -351,65 +359,92 @@ MatrixXd stack_rows(const std::vector<MatrixXd>& H) {
   return out;
 }
 
-// Time attention core for one row, from its (S, 3D) QKV projection.
-// `mask` covers active queries x all S_total = pos0 + S keys. When
-// `cache` is set, keys/values for the pos0 earlier context tokens come
-// from the cache at this layer, and the first n_enc_active active tokens
-// (new context patches) have their K/V appended to the cache. Returns
-// the pre-gate, pre-wO attention output (S, D).
-MatrixXd attn_time_row(const Session& s, const MatrixXd& qkv,
-                       const MaskM& mask, const MatrixXd& cosr, const MatrixXd& sinr,
-                       KVCache* cache, int layer, int row, int pos0, int n_enc_active) {
-  int S = qkv.rows(), D = qkv.cols() / 3;
-  int nh = s.cfg.num_heads, hd = s.cfg.head_dim();
-  int S_total = pos0 + S;
-  MatrixXd o(S, D);
+// Repack a (M, 3D) QKV projection into separate Q/K/V matrices in
+// head-block layout (head h in columns [h*hd, (h+1)*hd)), so per-head
+// work below uses contiguous block views instead of strided copies.
+void repack_qkv(const MatrixXd& qkv, int nh, int hd,
+                MatrixXd& Q, MatrixXd& K, MatrixXd& V) {
+  int M = qkv.rows(), D = nh * hd;
+  Q.resize(M, D); K.resize(M, D); V.resize(M, D);
   for (int h = 0; h < nh; ++h) {
-    MatrixXd q = head_slice(qkv, 0, h, nh, hd);
-    MatrixXd k = head_slice(qkv, 1, h, nh, hd);
-    MatrixXd v = head_slice(qkv, 2, h, nh, hd);
-    auto rot = [&](const MatrixXd& z) {
-      MatrixXd r(S, hd);
-      r.leftCols(hd / 2) = -z.rightCols(hd / 2);
-      r.rightCols(hd / 2) = z.leftCols(hd / 2);
-      return r;
-    };
-    q = q.cwiseProduct(cosr) + rot(q).cwiseProduct(sinr);
-    k = k.cwiseProduct(cosr) + rot(k).cwiseProduct(sinr);
-    if (cache && n_enc_active > 0) {
-      cache->K[layer][row].block(pos0, h * hd, n_enc_active, hd) = k.topRows(n_enc_active);
-      cache->V[layer][row].block(pos0, h * hd, n_enc_active, hd) = v.topRows(n_enc_active);
-    }
-    if (cache && pos0 > 0) {
-      MatrixXd kall(S_total, hd), vall(S_total, hd);
-      kall.topRows(pos0) = cache->K[layer][row].block(0, h * hd, pos0, hd);
-      kall.bottomRows(S) = k;
-      vall.topRows(pos0) = cache->V[layer][row].block(0, h * hd, pos0, hd);
-      vall.bottomRows(S) = v;
-      MatrixXd scores = (q * kall.transpose()) / std::sqrt((double)hd);
-      o.block(0, h * hd, S, hd) = softmax_rows(scores, &mask) * vall;
-    } else {
-      MatrixXd scores = (q * k.transpose()) / std::sqrt((double)hd);
-      o.block(0, h * hd, S, hd) = softmax_rows(scores, &mask) * v;
-    }
+    Q.block(0, h * hd, M, hd) = head_slice(qkv, 0, h, nh, hd);
+    K.block(0, h * hd, M, hd) = head_slice(qkv, 1, h, nh, hd);
+    V.block(0, h * hd, M, hd) = head_slice(qkv, 2, h, nh, hd);
   }
-  return o;
 }
 
-// Variate attention core for one slot, from its (R, 3D) QKV projection.
-// Returns the pre-gate, pre-wO attention output (R, D).
-MatrixXd attn_variate_slot(const Session& s, const MatrixXd& qkv, const MaskM* mask) {
-  int Rr = qkv.rows(), D = qkv.cols() / 3;
-  int nh = s.cfg.num_heads, hd = s.cfg.head_dim();
-  MatrixXd o(Rr, D);
+// Partial RoPE in place on a head-block-layout matrix; cos_s/sin_s are
+// (M, hd) and apply identically to every head.
+void rope_inplace(MatrixXd& Z, const MatrixXd& cos_s, const MatrixXd& sin_s,
+                  int nh, int hd) {
+  int M = Z.rows();
   for (int h = 0; h < nh; ++h) {
-    MatrixXd q = head_slice(qkv, 0, h, nh, hd);
-    MatrixXd k = head_slice(qkv, 1, h, nh, hd);
-    MatrixXd v = head_slice(qkv, 2, h, nh, hd);
-    MatrixXd scores = (q * k.transpose()) / std::sqrt((double)hd);
-    o.block(0, h * hd, Rr, hd) = softmax_rows(scores, mask) * v;
+    auto blk = Z.block(0, h * hd, M, hd);
+    MatrixXd rot(M, hd);
+    rot.leftCols(hd / 2) = -blk.rightCols(hd / 2);
+    rot.rightCols(hd / 2) = blk.leftCols(hd / 2);
+    blk = blk.cwiseProduct(cos_s) + rot.cwiseProduct(sin_s);
   }
-  return o;
+}
+
+// Time attention over stacked rows. Q/K/V are (R*S, D) head-block
+// layout, already RoPE'd; token (r, s) is at row r*S + s. bias[r] is
+// (S, S_total) for active queries. When `cache` is set, keys/values for
+// the pos0 earlier context tokens come from the cache at this layer, and
+// the first n_enc_active active tokens have their K/V appended to it.
+// Writes the pre-gate, pre-wO output into o_s (R*S, D).
+void attn_time_stacked(const Session& s, const MatrixXd& Q, const MatrixXd& K,
+                       const MatrixXd& V, const std::vector<MatrixXd>& bias,
+                       MatrixXd& o_s, KVCache* cache, int layer, int pos0,
+                       int n_enc_active, int R, int S) {
+  int nh = s.cfg.num_heads, hd = s.cfg.head_dim();
+  int S_total = pos0 + S;
+  double scale = 1.0 / std::sqrt((double)hd);
+  for (int r = 0; r < R; ++r) {
+    for (int h = 0; h < nh; ++h) {
+      auto q = Q.block(r * S, h * hd, S, hd);
+      auto k = K.block(r * S, h * hd, S, hd);
+      auto v = V.block(r * S, h * hd, S, hd);
+      if (cache && n_enc_active > 0) {
+        cache->K[layer][r].block(pos0, h * hd, n_enc_active, hd) =
+            K.block(r * S, h * hd, n_enc_active, hd);
+        cache->V[layer][r].block(pos0, h * hd, n_enc_active, hd) =
+            V.block(r * S, h * hd, n_enc_active, hd);
+      }
+      if (cache && pos0 > 0) {
+        MatrixXd kall(S_total, hd), vall(S_total, hd);
+        kall.topRows(pos0) = cache->K[layer][r].block(0, h * hd, pos0, hd);
+        kall.bottomRows(S) = k;
+        vall.topRows(pos0) = cache->V[layer][r].block(0, h * hd, pos0, hd);
+        vall.bottomRows(S) = v;
+        MatrixXd scores = (q * kall.transpose()) * scale;
+        o_s.block(r * S, h * hd, S, hd) = softmax_bias(scores, &bias[r]) * vall;
+      } else {
+        MatrixXd scores = (q * k.transpose()) * scale;
+        o_s.block(r * S, h * hd, S, hd) = softmax_bias(scores, &bias[r]) * v;
+      }
+    }
+  }
+}
+
+// Variate attention over slot-major stacked tokens (slot s at rows
+// [s*R, (s+1)*R)). var_bias[slot] is (R, R) or var_bias is empty.
+// Writes the pre-gate, pre-wO output into o_v (S*R, D).
+void attn_variate_stacked(const Session& s, const MatrixXd& Q, const MatrixXd& K,
+                          const MatrixXd& V, const std::vector<MatrixXd>& var_bias,
+                          MatrixXd& o_v, int pos0, int R, int S) {
+  int nh = s.cfg.num_heads, hd = s.cfg.head_dim();
+  double scale = 1.0 / std::sqrt((double)hd);
+  for (int sl = 0; sl < S; ++sl) {
+    const MatrixXd* bias = var_bias.empty() ? nullptr : &var_bias[pos0 + sl];
+    for (int h = 0; h < nh; ++h) {
+      auto q = Q.block(sl * R, h * hd, R, hd);
+      auto k = K.block(sl * R, h * hd, R, hd);
+      auto v = V.block(sl * R, h * hd, R, hd);
+      MatrixXd scores = (q * k.transpose()) * scale;
+      o_v.block(sl * R, h * hd, R, hd) = softmax_bias(scores, bias) * v;
+    }
+  }
 }
 
 // Apply the optional sigmoid gate and the wO projection to stacked
@@ -439,14 +474,24 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
   std::vector<double> inv_freq(hd / 2, 0.0);
   for (int i = 0, idx = 0; idx < rope_dim; idx += 2, ++i)
     inv_freq[i] = 1.0 / std::pow(cfg.rope_theta, (double)idx / rope_dim);
-  std::vector<MatrixXd> cosr(R, MatrixXd(S, hd)), sinr(R, MatrixXd(S, hd));
+  MatrixXd cos_s(R * S, hd), sin_s(R * S, hd);
   for (int r = 0; r < R; ++r)
     for (int i = 0; i < S; ++i)
       for (int d = 0; d < hd; ++d) {
         double f = positions(r, pos0 + i) * inv_freq[d % (hd / 2)];
-        cosr[r](i, d) = std::cos(f);
-        sinr[r](i, d) = std::sin(f);
+        cos_s(r * S + i, d) = std::cos(f);
+        sin_s(r * S + i, d) = std::sin(f);
       }
+  // Additive attention biases, converted once for all layers/heads.
+  std::vector<MatrixXd> time_bias(R);
+  for (int r = 0; r < R; ++r)
+    time_bias[r] = mask_to_bias(time_mask[r].block(pos0, 0, S, S_total));
+  std::vector<MatrixXd> var_bias;
+  if (!variate_mask.empty()) {
+    var_bias.resize(S_total);
+    for (int sl = 0; sl < S_total; ++sl) var_bias[sl] = mask_to_bias(variate_mask[sl]);
+  }
+  int nh = cfg.num_heads;
   static const std::unordered_map<std::string, std::vector<bool>> axes_of = {
       {"time", {true}}, {"variate", {false}},
       {"time_variate", {true, false}}, {"variate_time", {false, true}}};
@@ -458,32 +503,30 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
       std::vector<MatrixXd> xn = H;
       rms_norm_rows(xn, s.vec(np + ".scale"), cfg.norm_eps);
       if (axes[ai]) {
-        // One QKV GEMM over all rows; attention itself stays per row.
+        // One QKV GEMM over all rows, repacked to head-block layout;
+        // attention itself stays per row/head on block views.
         MatrixXd xn_s = stack_rows(xn);
         MatrixXd qkv_s = lin(s, xn_s, ap + ".wQKV.weight");
+        MatrixXd Q, K, V;
+        repack_qkv(qkv_s, nh, hd, Q, K, V);
+        rope_inplace(Q, cos_s, sin_s, nh, hd);
+        rope_inplace(K, cos_s, sin_s, nh, hd);
         MatrixXd o_s(R * S, cfg.d_model);
-        for (int r = 0; r < R; ++r) {
-          MaskM sub = time_mask[r].block(pos0, 0, S, S_total);
-          MatrixXd qkv_r = qkv_s.block(r * S, 0, S, 3 * cfg.d_model);
-          o_s.block(r * S, 0, S, cfg.d_model) =
-              attn_time_row(s, qkv_r, sub, cosr[r], sinr[r],
-                            cache, (int)li, r, pos0, n_enc_active);
-        }
+        attn_time_stacked(s, Q, K, V, time_bias, o_s, cache, (int)li, pos0,
+                          n_enc_active, R, S);
         MatrixXd y = attn_finish(s, o_s, xn_s, ap);
         for (int r = 0; r < R; ++r) H[r] += y.block(r * S, 0, S, cfg.d_model);
       } else {
         // Variate attention: stack tokens slot-major (s*R + r) so the QKV
-        // projection is again one GEMM; attention stays per slot.
+        // projection is again one GEMM; attention stays per slot/head.
         MatrixXd xv(S * R, cfg.d_model);
         for (int sl = 0; sl < S; ++sl)
           for (int r = 0; r < R; ++r) xv.row(sl * R + r) = xn[r].row(sl);
         MatrixXd qkv_v = lin(s, xv, ap + ".wQKV.weight");
+        MatrixXd Q, K, V;
+        repack_qkv(qkv_v, nh, hd, Q, K, V);
         MatrixXd o_v(S * R, cfg.d_model);
-        for (int sl = 0; sl < S; ++sl) {
-          const MaskM* mk = variate_mask.empty() ? nullptr : &variate_mask[pos0 + sl];
-          MatrixXd qkv_sl = qkv_v.block(sl * R, 0, R, 3 * cfg.d_model);
-          o_v.block(sl * R, 0, R, cfg.d_model) = attn_variate_slot(s, qkv_sl, mk);
-        }
+        attn_variate_stacked(s, Q, K, V, var_bias, o_v, pos0, R, S);
         MatrixXd y = attn_finish(s, o_v, xv, ap);
         for (int sl = 0; sl < S; ++sl)
           for (int r = 0; r < R; ++r) H[r].row(sl) += y.row(sl * R + r);
