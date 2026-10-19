@@ -36,13 +36,21 @@ fc <- timestral_forecast(m, Y, h = 96, past_covariates = P, known_covariates = K
 ## Validation
 
 Parity against the official PyTorch package (`timestral` 1.0.0, torch
-2.14.1 CPU, fp32 weights) on the 5M model, six cases (missing values,
-negative trend without mirroring, multivariate, covariates, horizon 1100,
-context 5000 capped to 4096 with horizon 2100): worst `max_rel` 2.0e-6,
-where `max_rel` is max abs difference over all quantiles/steps/variates
-relative to the largest official forecast value. A 28M spot check gives
-2.9e-7. Reproduce with `inst/parity_official.R` (developer machine only;
-end users never need Python).
+2.14.1 CPU, fp32 weights), six cases (missing values, negative trend
+without mirroring, multivariate, covariates, horizon 1100, context 5000
+capped to 4096 with horizon 2100), where `max_rel` is max abs difference
+over all quantiles/steps/variates relative to the largest official
+forecast value:
+
+| model | worst max_rel (case) | R time, worst case |
+|---|---|---|
+| 5M | 2.0e-6 (long horizon) | 0.8 s |
+| 28M | 2.9e-7 (spot check, univariate) | — |
+| 123M | 9.6e-6 (long context cap) | 8.1 s |
+| 209M | 2.6e-6 (long context cap) | 13.5 s |
+
+Reproduce with `inst/parity_official.R` (developer machine only; end
+users never need Python).
 
 ## Not yet supported
 
