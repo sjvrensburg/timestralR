@@ -1,0 +1,16 @@
+Package: timestralR
+Type: Package
+Title: Zero-Shot Probabilistic Forecasting with Timestral
+Version: 0.1.0
+Authors@R: person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
+    email = "sjansevanrensburg@gmail.com")
+Description: Runs Mistral AI's Timestral time-series foundation models from R
+    without Python or PyTorch. The official 'safetensors' checkpoints are
+    downloaded once from the Mistral AI Hugging Face repositories; the
+    transformer forward pass and the forecasting loop are implemented
+    natively in R on top of R's BLAS.
+License: Apache License (>= 2)
+Encoding: UTF-8
+Imports: jsonlite, utils, tools, stats
+SystemRequirements: None beyond R itself; model weights are downloaded on
+    first use from huggingface.co (Mistral AI, Modified MIT licence).

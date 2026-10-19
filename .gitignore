@@ -1,0 +1,5 @@
+.venv/
+.Rhistory
+.RData
+timestralR_*.tar.gz
+timestralR.Rcheck/
