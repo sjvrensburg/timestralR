@@ -96,6 +96,8 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 #' @param revision Hub revision when `model` is a size
 #' @param cache_dir checkpoint cache directory when `model` is a size
 #' @param local_files_only only read from the cache, never download
+#' @param backend "native" (default) for the compiled RcppEigen block
+#'   implementation, "R" for the pure-R reference implementation
 #' @export
 timestral_load <- function(model = "5M", max_context = NULL,
                            per_shot_horizon_patches = 32L,
@@ -103,7 +105,8 @@ timestral_load <- function(model = "5M", max_context = NULL,
                            extreme_value_threshold = 1e30,
                            revision = "main",
                            cache_dir = tools::R_user_dir("timestralR", "cache"),
-                           local_files_only = FALSE) {
+                           local_files_only = FALSE,
+                           backend = c("native", "R")) {
   if (per_shot_horizon_patches < 1)
     stop("per_shot_horizon_patches must be >= 1, got ", per_shot_horizon_patches)
   dir <- if (model %in% .sizes) {
@@ -115,10 +118,19 @@ timestral_load <- function(model = "5M", max_context = NULL,
     stop("'model' must be one of ", paste(.sizes, collapse = ", "),
          " or a directory with config.json and model.safetensors")
   }
+  backend <- match.arg(backend)
   cfg <- .read_config(file.path(dir, "config.json"))
   wts <- .read_f32_tensors(file.path(dir, "model.safetensors"))
   .check_weights(wts, cfg)
-  structure(list(weights = wts, config = cfg, dir = dir,
+  session <- if (backend == "native") {
+    .ts_load(wts, cfg[c("patch_size", "d_model", "num_heads", "mlp_hidden_dim",
+                        "block_size", "block_schedule", "quantile_knots",
+                        "rope_theta", "rope_partial_factor", "norm_eps",
+                        "minimum_scale", "quantile_width_factor", "use_asinh",
+                        "attend_missing_patches", "covariate_enabled")])
+  }
+  structure(list(weights = wts, config = cfg, dir = dir, backend = backend,
+                 session = session,
                  max_context = if (is.null(max_context)) cfg$context_length else as.integer(max_context),
                  per_shot_horizon_patches = min(as.integer(per_shot_horizon_patches), cfg$block_size),
                  quantile_real_cap_k = quantile_real_cap_k,

@@ -29,6 +29,14 @@ fc2 <- timestral_forecast(m, y2, h = 24, past_covariates = matrix(pa, ncol = 1),
 gold2 <- as.matrix(read.csv(file.path(fx, "golden_covariates.csv"), header = FALSE))
 stopifnot(max(abs(fc2$quantiles[1, , ] - gold2)) < 1e-5)
 
+## native and R backends agree on the fixtures
+m_R <- timestral_load(file.path(fx, "tiny"), max_context = 4096L, backend = "R")
+fc_R <- timestral_forecast(m_R, y, h = 24)
+stopifnot(max(abs(fc_R$quantiles - fc$quantiles)) < 1e-10)
+fc2_R <- timestral_forecast(m_R, y2, h = 24, past_covariates = matrix(pa, ncol = 1),
+                            known_covariates = matrix(kn, ncol = 1))
+stopifnot(max(abs(fc2_R$quantiles - fc2$quantiles)) < 1e-10)
+
 ## batch consistency: batched series equal one-at-a-time forecasts
 yb <- list(y, y2, rev(y))
 fcb <- timestral_forecast(m, yb, h = 24)
