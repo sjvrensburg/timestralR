@@ -49,14 +49,22 @@ relative to the context start, so a sliding window invalidates cached K.
 Cache memory is capped at 256 MB (estimated); above that the call falls
 back to a full compute.
 
+Speed milestones on the `native-speedups` branch (each profiled on
+209M after landing; single-threaded throughout, per the constraint
+below): M1 K/V cache — per-shot-8 h=1100 1.95 -> 1.20 s, no help in
+the truncating context-cap case by design; M2 batched GEMMs — batch10
+4.63 -> 2.29 s, context-cap 6.58 -> 5.13 s; M3 fused attention —
+neutral at S <= 224 (GEMMs dominate), 8.30 -> 7.50 s at 938 patches;
+M4 stacked activations — small consistent gains (5.03 -> 4.96 s).
+
 Benchmarks (`inst/benchmark.R`, this machine):
 
 | size | backend | univariate | long horizon | context cap | batch 10 |
 |---|---|---|---|---|---|
 | 5M | R | 0.05 s | 0.24 s | 0.81 s | 0.29 s |
-| 5M | native | 0.02 s | 0.06 s | 0.22 s | 0.17 s |
+| 5M | native | 0.02 s | 0.05 s | 0.19 s | 0.11 s |
 | 209M | R | 1.20 s | 3.73 s | 14.2 s | 7.8 s |
-| 209M | native | 0.57 s | 1.70 s | 6.4 s | 4.6 s |
+| 209M | native | 0.50 s | 1.27 s | 4.96 s | 2.28 s |
 
 ## Parity summary (official PyTorch, torch 2.14.1, fp32)
 

@@ -1,3 +1,15 @@
+# timestralR 0.3.1
+
+- Native backend speedups, no change to results (native vs R backend
+  still agrees to < 1e-10 on the fixtures; multi-block decode on 209M
+  agrees to ~4e-13): context K/V cached across decode blocks, rows
+  batched into single GEMMs, fused attention with head-block QKV
+  layout and mask-as-bias, and activations kept in one stacked matrix
+  through the transformer. The native backend remains
+  single-threaded by design (see `docs/developer-notes.md`).
+- Speed on this machine (209M): batch of 10 4.6 s -> 2.3 s,
+  long-context 6.4 s -> 5.0 s, long horizon 1.7 s -> 1.3 s.
+
 # timestralR 0.3.0
 
 - Native RcppEigen backend (default, `backend = "native"` in
