@@ -110,16 +110,12 @@ MatrixXd residual_block(const Session& s, const MatrixXd& X,
 }
 
 MatrixXd rms_norm(const MatrixXd& X, const VectorXd& scale, double eps) {
-  MatrixXd Y(X.rows(), X.cols());
-  for (int i = 0; i < X.rows(); ++i) {
-    double ms = X.row(i).squaredNorm() / X.cols();
-    Y.row(i) = (X.row(i) / std::sqrt(ms + eps)).cwiseProduct(scale.transpose());
+  MatrixXd Y = X;
+  for (int i = 0; i < Y.rows(); ++i) {
+    double ms = Y.row(i).squaredNorm() / Y.cols();
+    Y.row(i) = (Y.row(i) / std::sqrt(ms + eps)).cwiseProduct(scale.transpose());
   }
   return Y;
-}
-
-void rms_norm_rows(std::vector<MatrixXd>& H, const VectorXd& scale, double eps) {
-  for (auto& m : H) m = rms_norm(m, scale, eps);
 }
 
 // ---- scaler (scaler.py) ----------------------------------------------------
@@ -462,13 +458,16 @@ MatrixXd attn_finish(const Session& s, MatrixXd o, const MatrixXd& xn_stacked,
 // time_mask/variate_mask/positions are indexed by global token index.
 // When `cache` is set, the first n_enc_active active tokens are new
 // context patches whose K/V are appended to the cache.
-std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
-                                  const std::vector<MaskM>& time_mask,
-                                  const std::vector<MaskM>& variate_mask,
-                                  const MatrixXd& positions,
-                                  KVCache* cache, int pos0, int n_enc_active) {
+// Activations live in one stacked (R*S, D) matrix for the whole
+// transformer (token (r, s) at row r*S + s), so norms and projections
+// need no per-sublayer stacking copies.
+MatrixXd transformer(const Session& s, MatrixXd H,
+                     const std::vector<MaskM>& time_mask,
+                     const std::vector<MaskM>& variate_mask,
+                     const MatrixXd& positions,
+                     KVCache* cache, int pos0, int n_enc_active, int R) {
   const Cfg& cfg = s.cfg;
-  int R = (int)H.size(), S = (int)H[0].rows(), hd = cfg.head_dim();
+  int S = (int)H.rows() / R, hd = cfg.head_dim();
   int S_total = pos0 + S;
   int rope_dim = cfg.rope_dim();
   std::vector<double> inv_freq(hd / 2, 0.0);
@@ -500,13 +499,11 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
     for (size_t ai = 0; ai < axes.size(); ++ai) {
       std::string ap = "transformer.layers." + std::to_string(li) + ".attns." + std::to_string(ai);
       std::string np = "transformer.layers." + std::to_string(li) + ".attn_norms." + std::to_string(ai);
-      std::vector<MatrixXd> xn = H;
-      rms_norm_rows(xn, s.vec(np + ".scale"), cfg.norm_eps);
+      MatrixXd xn = rms_norm(H, s.vec(np + ".scale"), cfg.norm_eps);
       if (axes[ai]) {
         // One QKV GEMM over all rows, repacked to head-block layout;
         // attention itself stays per row/head on block views.
-        MatrixXd xn_s = stack_rows(xn);
-        MatrixXd qkv_s = lin(s, xn_s, ap + ".wQKV.weight");
+        MatrixXd qkv_s = lin(s, xn, ap + ".wQKV.weight");
         MatrixXd Q, K, V;
         repack_qkv(qkv_s, nh, hd, Q, K, V);
         rope_inplace(Q, cos_s, sin_s, nh, hd);
@@ -514,14 +511,13 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
         MatrixXd o_s(R * S, cfg.d_model);
         attn_time_stacked(s, Q, K, V, time_bias, o_s, cache, (int)li, pos0,
                           n_enc_active, R, S);
-        MatrixXd y = attn_finish(s, o_s, xn_s, ap);
-        for (int r = 0; r < R; ++r) H[r] += y.block(r * S, 0, S, cfg.d_model);
+        H += attn_finish(s, o_s, xn, ap);
       } else {
-        // Variate attention: stack tokens slot-major (s*R + r) so the QKV
-        // projection is again one GEMM; attention stays per slot/head.
+        // Variate attention: permute tokens slot-major (s*R + r) so the
+        // QKV projection is again one GEMM; attention stays per slot/head.
         MatrixXd xv(S * R, cfg.d_model);
         for (int sl = 0; sl < S; ++sl)
-          for (int r = 0; r < R; ++r) xv.row(sl * R + r) = xn[r].row(sl);
+          for (int r = 0; r < R; ++r) xv.row(sl * R + r) = xn.row(r * S + sl);
         MatrixXd qkv_v = lin(s, xv, ap + ".wQKV.weight");
         MatrixXd Q, K, V;
         repack_qkv(qkv_v, nh, hd, Q, K, V);
@@ -529,23 +525,19 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
         attn_variate_stacked(s, Q, K, V, var_bias, o_v, pos0, R, S);
         MatrixXd y = attn_finish(s, o_v, xv, ap);
         for (int sl = 0; sl < S; ++sl)
-          for (int r = 0; r < R; ++r) H[r].row(sl) += y.row(sl * R + r);
+          for (int r = 0; r < R; ++r) H.row(r * S + sl) += y.row(sl * R + r);
       }
     }
     std::string mp = "transformer.layers." + std::to_string(li) + ".mlp";
-    std::vector<MatrixXd> xn = H;
-    rms_norm_rows(xn, s.vec(mp + "_norm.scale"), cfg.norm_eps);
+    MatrixXd xn = rms_norm(H, s.vec(mp + "_norm.scale"), cfg.norm_eps);
     int hd2 = cfg.mlp_hidden_dim;
-    MatrixXd xn_s = stack_rows(xn);
-    MatrixXd gu = lin(s, xn_s, mp + ".w12.weight");
+    MatrixXd gu = lin(s, xn, mp + ".w12.weight");
     MatrixXd gate = gu.leftCols(hd2);
     MatrixXd up = gu.rightCols(hd2);
     MatrixXd act = gate.cwiseProduct(up.unaryExpr([](double v) { return silu(v); }));
-    MatrixXd y = lin(s, act, mp + ".w3.weight");
-    for (int r = 0; r < R; ++r) H[r] += y.block(r * S, 0, S, cfg.d_model);
+    H += lin(s, act, mp + ".w3.weight");
   }
-  rms_norm_rows(H, s.vec("transformer.out_norm.scale"), cfg.norm_eps);
-  return H;
+  return rms_norm(H, s.vec("transformer.out_norm.scale"), cfg.norm_eps);
 }
 
 // ---- patch embedding, head, predict_block ------------------------------------
@@ -637,14 +629,15 @@ std::vector<MatrixXd> run_two_stream(const Session& s, const std::vector<MatrixX
                                      const MatrixXd& positions,
                                      KVCache* cache, int pos0) {
   int R = (int)x_enc.size(), n_enc = (int)x_enc[0].rows(), n_dec = (int)x_dec[0].rows();
-  std::vector<MatrixXd> H(R, MatrixXd(n_enc + n_dec, s.cfg.d_model));
+  int S = n_enc + n_dec;
+  MatrixXd H(R * S, s.cfg.d_model);
   for (int r = 0; r < R; ++r) {
-    H[r].topRows(n_enc) = x_enc[r];
-    H[r].bottomRows(n_dec) = x_dec[r];
+    H.block(r * S, 0, n_enc, s.cfg.d_model) = x_enc[r];
+    H.block(r * S + n_enc, 0, n_dec, s.cfg.d_model) = x_dec[r];
   }
-  H = transformer(s, H, time_mask, variate_mask, positions, cache, pos0, n_enc);
+  H = transformer(s, H, time_mask, variate_mask, positions, cache, pos0, n_enc, R);
   std::vector<MatrixXd> dec(R);
-  for (int r = 0; r < R; ++r) dec[r] = H[r].bottomRows(n_dec);
+  for (int r = 0; r < R; ++r) dec[r] = H.block(r * S + n_enc, 0, n_dec, s.cfg.d_model);
   return monotone_head_batch(s, dec);
 }
 
