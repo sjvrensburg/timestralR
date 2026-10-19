@@ -24,6 +24,14 @@
   logical tsibbles work as observation masks; keyed tsibble covariates
   are matched to series by key and validated like other covariates. Plots
   label variates by name.
+- Documentation and `NAMESPACE` are generated with roxygen2; methods for
+  ggplot2, tsibble and fabletools generics are registered through
+  delayed `S3method()` entries instead of `.onLoad` hooks. DESCRIPTION
+  now states `Depends: R (>= 4.0.0)` (needed for `tools::R_user_dir()`).
+- The native backend is split from one file into per-unit headers and
+  implementation files (`session`, `nn_ops`, `scaler`, `masks`,
+  `attention`, `transformer`, `head`, `predict`, plus the Rcpp entry
+  points); outputs are bit-for-bit unchanged.
 
 # timestralR 0.4.0
 

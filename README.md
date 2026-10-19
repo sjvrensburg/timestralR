@@ -17,10 +17,13 @@ remotes::install_github("sjvrensburg/timestralR")
 # R CMD INSTALL timestralR   (or devtools::install())
 ```
 
-Requires only R and the `jsonlite` package. Model weights are downloaded
-once per user on first use (21 MB for 5M up to 837 MB for 209M, fp32) and
-cached. Weights are Mistral AI's, under their Modified MIT licence; package
-code is Apache 2.0.
+Requires R (>= 4.0) with a C++17 compiler; the R dependencies are
+`jsonlite` and `Rcpp`/`RcppEigen`. `zoo`, `xts`, `tsibble`, `ggplot2`,
+`fabletools`, `fable` and `distributional` are optional and only needed
+for the matching interfaces. Model weights are downloaded once per user
+on first use (21 MB for 5M up to 837 MB for 209M, fp32) and cached.
+Weights are Mistral AI's, under their Modified MIT licence; package code
+is Apache 2.0.
 
 ## Use
 
@@ -30,17 +33,58 @@ m  <- timestral_load("28M")                  # or a local checkpoint directory
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 plot(fc)                                     # fan chart: history + median + bands
 timestral_median(fc)                         # a ts, starting Jan 1961
+timestral_quantile(fc, 0.9)                  # any of timestral_levels()
 fc$quantiles                                 # array: variate x step x 21 levels
 head(as_forecast_df(fc))                     # tidy long format (with time column)
-# ts/mts, zoo and xts inputs keep their time index; covariates with a time
-# index are checked for alignment with y. Also works with the tidyverts:
-# tsibble input (keys = batch, measured variables = variates),
-# ggplot2::autoplot(fc), tsibble::as_tsibble(fc), fabletools::as_fable(fc),
-# and as a fable model: model(TIMESTRAL(value, model = m))
-# multivariate (columns = variates), past-only and known-future covariates
-# (time in rows; known covariates need T + h rows):
-fc <- timestral_forecast(m, Y, h = 96, past_covariates = P, known_covariates = K)
 ```
+
+Inputs can be numeric vectors, `ts`/`mts`, `zoo`/`xts` (the time index
+is kept), matrices or data frames with time in rows, or a list of series
+forecast as a batch. Columns of a series are forecast jointly; `NA`
+marks missing values, and `observation_mask` can mark more.
+
+```r
+# multivariate: columns are forecast jointly
+fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
+
+# a batch of independent series in one call
+fcb <- timestral_forecast(m, list(a = mdeaths, b = fdeaths), h = 12)
+
+# covariates, time in rows: past-only over the context, known-future over
+# the context plus the horizon (T + h rows)
+y <- as.numeric(AirPassengers)
+x <- seq_len(length(y) + 12)
+fc3 <- timestral_forecast(m, y, h = 12,
+                          past_covariates = log(y),
+                          known_covariates = cbind(trend = x),
+                          categorical_known_covariates = (x - 1) %% 12)
+```
+
+### tidyverts and ggplot2
+
+```r
+library(tsibble)
+library(fable)
+
+# tsibble input: keys become the batch, measured variables the jointly
+# forecast variates; rows are taken in index order and implicit gaps are
+# filled with NA
+fc <- timestral_forecast(m, as_tsibble(AirPassengers), h = 24)
+as_tsibble(fc)                 # quantile columns, yearmonth index
+as_fable(fc)                   # 21-quantile distributions
+ggplot2::autoplot(fc)          # ggplot2 fan chart
+
+# as a fable model, alongside the usual ones
+as_tsibble(AirPassengers) |>
+  model(timestral = TIMESTRAL(value, model = m), ets = ETS(value)) |>
+  forecast(h = 24)
+```
+
+Forecasts from `ts` input get the same index class as
+`tsibble::as_tsibble()` gives the `ts`, so they join with and score
+against the observed data. Fitted `TIMESTRAL()` models keep a handle to
+the checkpoint rather than the weights, so mables stay small when saved
+and work in parallel workers.
 
 ## Validation
 
@@ -72,6 +116,12 @@ users never need Python).
 Nothing in the Python package's inference surface: batched series,
 observation masks, numeric and categorical covariates, and all
 forecaster/loader options are supported. (Training and GPU execution are
-Python-side concerns with no R analogue.) Developer notes, including the
-frozen internal interface for a future native port, are in
-`docs/developer-notes.md`.
+Python-side concerns with no R analogue.)
+
+## Development
+
+Help pages and `NAMESPACE` are generated with roxygen2
+(`Rscript -e 'roxygen2::roxygenise()'`); the native backend in `src/` is
+split into one header and one implementation file per unit. Developer
+notes, including the source layout, the frozen internal interface and
+benchmarks, are in `docs/developer-notes.md`.
