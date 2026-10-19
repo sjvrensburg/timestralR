@@ -64,6 +64,18 @@ for (b in 1:3) {
 }
 dfb <- as_forecast_df(fcb)
 stopifnot(nrow(dfb) == 3 * 24, all(c("series", "q50") %in% names(dfb)))
+## a list of ts sharing one index keeps it; mixed indexes drop it
+yb_ts <- lapply(yb, stats::ts, start = c(2000, 1), frequency = 12)
+fcb_ts <- timestral_forecast(m, yb_ts, h = 6)
+stopifnot(identical(fcb_ts$index, as.numeric(stats::time(yb_ts[[1]]))),
+          identical(fcb_ts$tsp, stats::tsp(yb_ts[[1]])),
+          max(abs(fcb_ts$quantiles - fcb$quantiles[, , 1:6, , drop = FALSE])) < 1e-12)
+yb_ts[[2]] <- stats::ts(yb[[2]], start = c(2001, 1), frequency = 12)
+stopifnot(is.null(timestral_forecast(m, yb_ts, h = 6)$index))
+## named lists name the series but leave dim() unnamed
+fcb_named <- timestral_forecast(m, list(a = y, b = y2), h = 6)
+stopifnot(is.null(names(dim(fcb_named$quantiles))),
+          identical(dimnames(fcb_named$quantiles)$series, c("a", "b")))
 
 ## accessors
 stopifnot(max(abs(timestral_median(fc) - fc$quantiles[, , 11, drop = FALSE])) == 0)
@@ -167,7 +179,12 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   fc_gg <- timestral_forecast(m, y, h = 12)
   p <- ggplot2::autoplot(fc_gg)
   stopifnot(inherits(p, "ggplot"))
-  invisible(ggplot2::ggplot_build(p))
+  pb <- ggplot2::ggplot_build(p)
+  ## bands drawn widest first, legend narrowest first, graded shades
+  fills <- unique(pb$data[[1]]$fill)
+  stopifnot(length(fills) == 4L,
+            identical(p$scales$get_scales("fill")$breaks,
+                      c("50%", "80%", "90%", "98%")))
   stopifnot(is.list(ggplot2::autolayer(fc_gg)))
 }
 
@@ -247,7 +264,7 @@ if (requireNamespace("tsibble", quietly = TRUE)) {
   fc_v <- timestral_forecast(m, d2, h = 4)
   if (requireNamespace("ggplot2", quietly = TRUE)) {
     gd <- timestralR:::.fc_gg_data(fc_v, 1L, 0.8)
-    stopifnot(identical(sort(unique(gd$hist$variate)), c("v1", "v2")))
+    stopifnot(identical(levels(gd$hist$variate), c("v1", "v2")))
   }
   if (requireNamespace("fabletools", quietly = TRUE) &&
       requireNamespace("distributional", quietly = TRUE)) {

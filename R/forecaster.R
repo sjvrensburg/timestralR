@@ -284,14 +284,23 @@
       storage.mode(m) <- "double"
       m
     })
-    Ts <- vapply(parts, nrow, integer(1)); Vs <- vapply(parts, ncol, integer(1))
+    Ts <- unname(vapply(parts, nrow, integer(1)))
+    Vs <- unname(vapply(parts, ncol, integer(1)))
     if (length(unique(Ts)) != 1L || length(unique(Vs)) != 1L)
       stop("all series in a batch must have the same length and variate count")
     arr <- array(0, c(Ts[1], Vs[1], length(parts)))
     for (b in seq_along(parts)) arr[, , b] <- parts[[b]]
+    ## a time index (and ts attributes) shared by every series is kept
+    shared <- function(get) {
+      vals <- lapply(y, get)
+      if (is.null(vals[[1]]) ||
+          !all(vapply(vals, identical, logical(1), vals[[1]]))) NULL
+      else vals[[1]]
+    }
     return(list(arr = aperm(arr, c(3, 2, 1)), vnames = colnames(parts[[1]]),
-                tsp = tsp_y, index = NULL, T = Ts[1], V = Vs[1],
-                B = length(parts), snames = names(y)))
+                tsp = shared(function(e) if (stats::is.ts(e)) stats::tsp(e)),
+                index = shared(function(e) .strip_time_index(e)$index),
+                T = Ts[1], V = Vs[1], B = length(parts), snames = names(y)))
   }
   if (is.array(y) && length(dim(y)) == 3L) {
     storage.mode(y) <- "double"
@@ -392,7 +401,8 @@
 #'   forecast variates), matrix
 #'   or data frame with time in rows and one column per target variate, a 3-D
 #'   array (time, variate, series), or a list of per-series vectors/matrices
-#'   (NA = missing). Variates of a series are forecast jointly; series in a
+#'   (NA = missing; a time index shared by every series in the list is
+#'   kept). Variates of a series are forecast jointly; series in a
 #'   batch are forecast independently in one call. Covariates may also be
 #'   `ts`/`zoo`/`xts` or `tsibble`; when both `y` and a covariate carry a
 #'   time index, the covariate index must align with the context (and

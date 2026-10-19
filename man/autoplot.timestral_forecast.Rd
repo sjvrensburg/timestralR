@@ -27,7 +27,10 @@ Registered as S3 methods for \code{ggplot2::autoplot()} and
 \code{ggplot2::autolayer()} when ggplot2 is loaded. \code{autoplot} draws the
 observed history, the median, and nested predictive interval bands;
 \code{autolayer} adds just the forecast bands and median to an existing
-ggplot (for example of the observed series).
+ggplot (for example of the observed series). Bands are drawn widest
+first in graded shades of blue, matching \code{\link[=plot.timestral_forecast]{plot.timestral_forecast()}};
+add any fill scale, such as \code{ggplot2::scale_fill_brewer()}, to change
+them.
 }
 \examples{
 \dontrun{

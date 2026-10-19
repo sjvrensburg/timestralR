@@ -25,7 +25,8 @@ timestral_forecast(
 forecast variates), matrix
 or data frame with time in rows and one column per target variate, a 3-D
 array (time, variate, series), or a list of per-series vectors/matrices
-(NA = missing). Variates of a series are forecast jointly; series in a
+(NA = missing; a time index shared by every series in the list is
+kept). Variates of a series are forecast jointly; series in a
 batch are forecast independently in one call. Covariates may also be
 \code{ts}/\code{zoo}/\code{xts} or \code{tsibble}; when both \code{y} and a covariate carry a
 time index, the covariate index must align with the context (and
