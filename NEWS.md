@@ -11,6 +11,19 @@
   `fabletools::as_fable()` method converting forecasts to `fbl_ts`.
   S3 methods for these generics are registered conditionally when the
   owning package is loaded.
+- Fixes to the tidyverts interfaces: `as_tsibble()`/`as_fable()` keep
+  the index column for `ts`, `zoo` and `xts` forecasts (named `index`,
+  and for `ts` with the `yearmonth`/`yearquarter`/... class that
+  `tsibble::as_tsibble()` uses) and for tsibble indexes named `time` or
+  `step`; multivariate forecasts convert to a fable with a `variate` key;
+  quantile distributions are built in a way that works across
+  distributional versions. Fitted `TIMESTRAL()` models store a handle to
+  the checkpoint instead of the weights, so mables stay small when saved
+  and forecast in new sessions or parallel workers. Tsibble inputs are
+  put in index order and implicit gaps are filled with missing values;
+  logical tsibbles work as observation masks; keyed tsibble covariates
+  are matched to series by key and validated like other covariates. Plots
+  label variates by name.
 
 # timestralR 0.4.0
 

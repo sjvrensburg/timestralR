@@ -1,27 +1,41 @@
 ## tsibble support (tsibble is a Suggests-only dependency; these helpers
 ## are only called for tsibble inputs or by the as_tsibble method).
 
-## Split a tsibble into per-key-group numeric matrices (time in rows).
-## Returns list(index, index_var, groups, meas, snames); every group must
-## share the same time index.
-.tsibble_groups <- function(x) {
+## Make implicit gaps explicit: missing time steps of a regular tsibble
+## become NA rows (masked as missing downstream) so the context stays
+## aligned with the calendar.
+.tsibble_fill_gaps <- function(x) {
+  if (tsibble::is_regular(x) && any(tsibble::has_gaps(x)$.gaps))
+    x <- tsibble::fill_gaps(x)
+  x
+}
+
+## Split a tsibble into per-key-group matrices (time in rows, ordered by
+## the index). Returns list(index, index_var, groups, meas, snames, keyed);
+## every group must share the same time index. Logical measured variables
+## are accepted only when allow_logical (observation masks).
+.tsibble_groups <- function(x, allow_logical = FALSE) {
   if (!requireNamespace("tsibble", quietly = TRUE))
     stop("tsibble input requires the tsibble package")
+  x <- .tsibble_fill_gaps(x)
   iv <- tsibble::index_var(x)
   meas <- tsibble::measured_vars(x)
   if (length(meas) == 0L)
     stop("tsibble has no measured variables to forecast")
   df <- as.data.frame(x)
-  nonnum <- meas[!vapply(df[meas], is.numeric, logical(1))]
+  ok <- function(col) is.numeric(col) || (allow_logical && is.logical(col))
+  nonnum <- meas[!vapply(df[meas], ok, logical(1))]
   if (length(nonnum))
-    stop("tsibble measured variables must be numeric; non-numeric: ",
-         paste(nonnum, collapse = ", "))
+    stop("tsibble measured variables must be ",
+         if (allow_logical) "numeric or logical" else "numeric",
+         "; non-numeric: ", paste(nonnum, collapse = ", "))
   kd <- tsibble::key_data(x)
   keys <- tsibble::key_vars(x)
   rows_list <- kd[[".rows"]]
   index1 <- NULL; groups <- list(); snames <- character(length(rows_list))
   for (i in seq_along(rows_list)) {
     rows <- rows_list[[i]]
+    rows <- rows[order(df[rows, iv])]
     idx <- df[rows, iv]
     if (is.null(index1)) {
       index1 <- idx
@@ -37,13 +51,13 @@
     }
   }
   list(index = index1, index_var = iv, groups = groups, meas = meas,
-       snames = snames)
+       snames = snames, keyed = length(keys) > 0L)
 }
 
 ## .as_batch equivalent for a tsibble: keys become the batch, measured
 ## variables become jointly forecast variates.
-.as_tsibble_batch <- function(y) {
-  gr <- .tsibble_groups(y)
+.as_tsibble_batch <- function(y, allow_logical = FALSE) {
+  gr <- .tsibble_groups(y, allow_logical)
   mats <- gr$groups
   arr <- array(0, c(nrow(mats[[1]]), length(gr$meas), length(mats)))
   for (b in seq_along(mats)) arr[, , b] <- mats[[b]]
@@ -52,8 +66,27 @@
        V = length(gr$meas), B = length(mats), snames = gr$snames)
 }
 
-.batch_dispatch <- function(y) {
-  if (inherits(y, "tbl_ts")) .as_tsibble_batch(y) else .as_batch(y)
+.batch_dispatch <- function(y, allow_logical = FALSE) {
+  if (inherits(y, "tbl_ts")) .as_tsibble_batch(y, allow_logical) else .as_batch(y)
+}
+
+## Future time index in tidyverts form. For ts input this matches the
+## index that tsibble::as_tsibble() gives a ts (yearmonth, yearquarter,
+## ...), so forecasts join with and score against the observed tsibble.
+.tidy_future_index <- function(x) {
+  if (!is.null(x$tsp)) {
+    tsp <- x$tsp
+    dummy <- stats::ts(numeric(x$h), start = tsp[2] + 1 / tsp[3],
+                       frequency = tsp[3])
+    return(tsibble::as_tsibble(dummy)$index)
+  }
+  x$future_index
+}
+
+## Index column name for tidyverts output: the input tsibble's index, or
+## "index" as tsibble::as_tsibble() uses for ts, zoo and xts.
+.tidy_index_var <- function(x) {
+  if (!is.null(x$index_var)) x$index_var else "index"
 }
 
 #' Convert a Timestral forecast to a tsibble
@@ -62,7 +95,12 @@
 #' series/variate/step and one column per quantile level (as in
 #' [as_forecast_df()]). Registered as an S3 method for
 #' `tsibble::as_tsibble()` when the tsibble package is available; call it
-#' as `tsibble::as_tsibble(fc)`.
+#' as `tsibble::as_tsibble(fc)`. The index column keeps the name of the
+#' input tsibble's index, and is `index` otherwise, as
+#' `tsibble::as_tsibble()` names it for `ts`, `zoo` and `xts`. Forecasts
+#' from `ts` input use the same index class (`yearmonth`, `yearquarter`,
+#' ...) that `tsibble::as_tsibble()` gives the `ts`, so they join with the
+#' observed data.
 #'
 #' @param x a `timestral_forecast` created from indexed input (`ts`,
 #'   `zoo`, `xts` or `tsibble`), so a future time index is available
@@ -81,9 +119,10 @@ as_tsibble.timestral_forecast <- function(x, ...) {
   if (!requireNamespace("tsibble", quietly = TRUE))
     stop("converting to a tsibble requires the tsibble package")
   df <- as_forecast_df(x)
-  iv <- if (!is.null(x$index_var)) x$index_var else "time"
-  df[[iv]] <- df$time
+  iv <- .tidy_index_var(x)
+  idx <- .tidy_future_index(x)[df$step]
   df$time <- NULL; df$step <- NULL
+  df[[iv]] <- idx
   has_series <- "series" %in% names(df)
   multi_variate <- length(unique(df$variate)) > 1L
   keys <- c(if (has_series) "series", if (multi_variate) "variate")

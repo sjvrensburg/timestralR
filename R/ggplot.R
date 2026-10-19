@@ -5,35 +5,10 @@ utils::globalVariables(".data")
 
 ## Long-format band/median/history data for one series of a forecast.
 .fc_gg_data <- function(fc, series, levels) {
-  if (is.null(fc$observed))
-    stop("this forecast object has no stored history; re-create it with ",
-         "timestral_forecast() from this version")
-  if (length(series) != 1L || series < 1L || series > fc$n_series)
-    stop("series must be one series index between 1 and ", fc$n_series)
-  obs <- matrix(fc$observed[series, , ], nrow = dim(fc$observed)[2L])
-  nv <- nrow(obs)
-  vnames <- rownames(obs)
-  if (is.null(vnames)) vnames <- paste0("V", seq_len(nv))
-  times <- if (!is.null(fc$index)) fc$index else seq_len(ncol(obs))
-  ftimes <- if (!is.null(fc$future_index)) {
-    fc$future_index
-  } else if (length(times) >= 2L) {
-    times[length(times)] +
-      (times[length(times)] - times[length(times) - 1L]) * seq_len(fc$h)
-  } else {
-    times + seq_len(fc$h)
-  }
-  qmat <- function(v) {
-    if (fc$n_series == 1L) matrix(fc$quantiles[v, , ], nrow = fc$h)
-    else matrix(fc$quantiles[series, v, , ], nrow = fc$h)
-  }
-  knot <- function(p) {
-    i <- which.min(abs(fc$levels - p))
-    if (abs(fc$levels[i] - p) > 1e-9)
-      stop("no quantile knot at level ", p, "; interval levels must pair ",
-           "two knots from timestral_levels()")
-    i
-  }
+  pp <- .fc_plot_parts(fc, series)
+  obs <- pp$obs; nv <- pp$nv; vnames <- pp$vnames
+  times <- pp$times; ftimes <- pp$ftimes
+  qmat <- pp$qmat; knot <- pp$knot
   hist_df <- do.call(rbind, lapply(seq_len(nv), function(v) {
     data.frame(time = times, variate = vnames[v], value = obs[v, ],
                stringsAsFactors = FALSE)

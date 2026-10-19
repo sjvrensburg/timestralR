@@ -8,7 +8,10 @@ TIMESTRAL(formula, model, symmetric = TRUE, clip_nonnegative = TRUE, ...)
 \item{formula}{the response formula, as in other fable models, e.g.
 \code{TIMESTRAL(value)}}
 \item{model}{a \code{timestral_model} from \code{\link{timestral_load}};
-loaded once and reused for every key and forecast}
+loaded once and reused for every key and forecast. Fitted models store only
+the checkpoint directory and load settings, not the weights, so a mable stays
+small when saved and is reloaded from disk when forecast in a new R session or
+a parallel worker.}
 \item{symmetric, clip_nonnegative}{as in \code{\link{timestral_forecast}}}
 \item{...}{passed to the model definition (currently unused)}
 }

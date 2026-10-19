@@ -16,11 +16,14 @@ column per target
 variate, a 3-D array (time, variate, series), or a list of per-series
 vectors/matrices (NA = missing). Variates of a series are forecast jointly;
 series in a batch are forecast independently in one call. Covariates may also
-be \code{ts}/\code{zoo}/\code{xts}; when both \code{y} and a covariate carry a
-time index, the covariate index must align with the context (and future)
-index of \code{y}.}
+be \code{ts}/\code{zoo}/\code{xts} or \code{tsibble}; when both \code{y} and a
+covariate carry a time index, the covariate index must align with the context
+(and future) index of \code{y}. Tsibble rows are taken in index order, and
+implicit gaps in a regular tsibble are filled with missing values; the keys of
+a keyed tsibble covariate are matched to the series of \code{y} by value.}
 \item{h}{horizon in steps}
-\item{observation_mask}{optional logical shaped like \code{y}; FALSE marks
+\item{observation_mask}{optional logical shaped like \code{y} (for a tsibble
+\code{y}, a tsibble with logical measured variables); FALSE or NA marks
 additional missing values}
 \item{past_covariates}{known over the context only (T time rows, or the batch
 forms described for \code{y})}

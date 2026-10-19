@@ -1,3 +1,36 @@
+## Pieces shared by plot() and the ggplot2 methods for one series of a
+## forecast: observed history (variate x time, named), time axes,
+## per-variate quantile matrices (step x level), and the knot lookup.
+.fc_plot_parts <- function(fc, series) {
+  if (is.null(fc$observed))
+    stop("this forecast object has no stored history; re-create it with ",
+         "timestral_forecast() from this version")
+  if (length(series) != 1L || series < 1L || series > fc$n_series)
+    stop("series must be one series index between 1 and ", fc$n_series)
+  d <- dim(fc$observed)
+  vnames <- dimnames(fc$observed)[[2L]]
+  if (is.null(vnames)) vnames <- paste0("V", seq_len(d[2L]))
+  obs <- matrix(fc$observed[series, , ], nrow = d[2L],
+                dimnames = list(vnames, NULL))
+  times <- if (!is.null(fc$index)) fc$index else seq_len(ncol(obs))
+  ftimes <- fc$future_index
+  if (is.null(ftimes)) ftimes <- .future_index(times, fc$h)
+  if (is.null(ftimes)) ftimes <- times[length(times)] + seq_len(fc$h)
+  qmat <- function(v) {
+    if (fc$n_series == 1L) matrix(fc$quantiles[v, , ], nrow = fc$h)
+    else matrix(fc$quantiles[series, v, , ], nrow = fc$h)
+  }
+  knot <- function(p) {
+    i <- which.min(abs(fc$levels - p))
+    if (abs(fc$levels[i] - p) > 1e-9)
+      stop("no quantile knot at level ", p, "; available levels are in ",
+           "timestral_levels() (interval levels must pair two knots)")
+    i
+  }
+  list(obs = obs, nv = nrow(obs), vnames = vnames, times = times,
+       ftimes = ftimes, qmat = qmat, knot = knot)
+}
+
 #' Fan-chart plot of a Timestral forecast
 #'
 #' @param x a `timestral_forecast`
@@ -20,35 +53,10 @@ plot.timestral_forecast <- function(x, series = 1L,
                                     levels = c(0.5, 0.8, 0.9, 0.98),
                                     main = NULL, xlab = "Time", ylab = NULL,
                                     ...) {
-  if (is.null(x$observed))
-    stop("this forecast object has no stored history; re-create it with ",
-         "timestral_forecast() from this version")
-  if (length(series) != 1L || series < 1L || series > x$n_series)
-    stop("series must be one series index between 1 and ", x$n_series)
-  obs <- matrix(x$observed[series, , ], nrow = dim(x$observed)[2L])
-  nv <- nrow(obs)
-  vnames <- rownames(obs)
-  if (is.null(vnames)) vnames <- paste0("V", seq_len(nv))
-  times <- if (!is.null(x$index)) x$index else seq_len(ncol(obs))
-  ftimes <- if (!is.null(x$future_index)) {
-    x$future_index
-  } else if (length(times) >= 2L) {
-    times[length(times)] +
-      (times[length(times)] - times[length(times) - 1L]) * seq_len(x$h)
-  } else {
-    times + seq_len(x$h)
-  }
-  qmat <- function(v) {
-    if (x$n_series == 1L) x$quantiles[v, , ]
-    else x$quantiles[series, v, , ]
-  }
-  knot <- function(p) {
-    i <- which.min(abs(x$levels - p))
-    if (abs(x$levels[i] - p) > 1e-9)
-      stop("no quantile knot at level ", p, "; available levels are in ",
-           "timestral_levels() (interval levels must pair two knots)")
-    i
-  }
+  pp <- .fc_plot_parts(x, series)
+  obs <- pp$obs; nv <- pp$nv; vnames <- pp$vnames
+  times <- pp$times; ftimes <- pp$ftimes
+  qmat <- pp$qmat; knot <- pp$knot
   ## widest band lightest, narrowest darkest
   band_cols <- character(length(levels))
   band_cols[order(levels)] <- vapply(
@@ -57,7 +65,7 @@ plot.timestral_forecast <- function(x, series = 1L,
   old_par <- graphics::par(mfrow = c(nv, 1L))
   on.exit(graphics::par(old_par))
   for (v in seq_len(nv)) {
-    q <- matrix(qmat(v), nrow = x$h)
+    q <- qmat(v)
     hist_y <- obs[v, ]
     finite <- is.finite(hist_y)
     a <- max(which(finite))

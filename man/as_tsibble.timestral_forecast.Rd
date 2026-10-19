@@ -19,6 +19,12 @@ series/variate/step and one column per quantile level (as in
 \code{\link{as_forecast_df}}). Forecasts can also be created directly
 from a tsibble: in \code{\link{timestral_forecast}}, tsibble keys become
 the batch and measured variables the jointly forecast variates.
+The index column keeps the name of the input tsibble's index, and is
+\code{index} otherwise, as \code{tsibble::as_tsibble()} names it for
+\code{ts}, \code{zoo} and \code{xts}. Forecasts from \code{ts} input use the
+same index class (\code{yearmonth}, \code{yearquarter}, ...) that
+\code{tsibble::as_tsibble()} gives the \code{ts}, so they join with the
+observed data.
 }
 \examples{
 \dontrun{

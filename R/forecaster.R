@@ -309,22 +309,27 @@
 ## Covariates to a list of (C, L) matrices, one per series. Forms mirror y:
 ## vector/matrix (time in rows) for B=1, 3-D array (time, covariate, series),
 ## or a list of per-series matrices.
-.as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE) {
+.as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE,
+                          snames = NULL) {
   if (is.null(x)) return(NULL)
-  if (inherits(x, "tbl_ts")) {
-    gr <- .tsibble_groups(x)
-    if (length(gr$groups) != B)
-      stop(name, " tsibble must have one key group per series (", B, ")")
-    out <- lapply(gr$groups, function(m) {
-      if (nrow(m) != expected_len)
-        stop(name, " must have ", expected_len, " rows (time in rows), got ",
-             nrow(m))
-      t(m)
-    })
-    attr(out, "index") <- gr$index
-    return(out)
-  }
   cov_index <- NULL
+  if (inherits(x, "tbl_ts")) {
+    ## Per-key matrices, matched to the series of y by key value, then
+    ## validated like any other list of per-series covariates.
+    gr <- .tsibble_groups(x)
+    mats <- gr$groups
+    if (gr$keyed) {
+      if (is.null(snames) || length(mats) != B ||
+          !setequal(snames, gr$snames))
+        stop(name, " tsibble keys (", paste(gr$snames, collapse = ", "),
+             ") must match the series of y (",
+             if (is.null(snames)) "unnamed" else paste(snames, collapse = ", "),
+             ")")
+      mats <- mats[match(snames, gr$snames)]
+    }
+    x <- mats
+    cov_index <- gr$index
+  }
   one <- function(elt) {
     st <- .strip_time_index(elt)
     if (is.null(cov_index) && !is.null(st$index)) cov_index <<- st$index
@@ -357,10 +362,13 @@
 
 .as_obs_mask <- function(observation_mask, batch) {
   if (is.null(observation_mask)) return(NULL)
-  fake <- .batch_dispatch(observation_mask)
+  fake <- .batch_dispatch(observation_mask, allow_logical = TRUE)
   if (!identical(dim(fake$arr), dim(batch$arr)))
     stop("observation_mask must be shaped like the context")
-  fake$arr != 0
+  out <- fake$arr != 0
+  ## NA (e.g. rows added by filling tsibble gaps) marks a missing value
+  out[is.na(out)] <- FALSE
+  out
 }
 
 .combine_cov <- function(numeric_list, encoded_list, B) {
@@ -384,10 +392,15 @@
 #'   array (time, variate, series), or a list of per-series vectors/matrices
 #'   (NA = missing). Variates of a series are forecast jointly; series in a
 #'   batch are forecast independently in one call. Covariates may also be
-#'   `ts`/`zoo`/`xts`; when both `y` and a covariate carry a time index, the
-#'   covariate index must align with the context (and future) index of `y`.
+#'   `ts`/`zoo`/`xts` or `tsibble`; when both `y` and a covariate carry a
+#'   time index, the covariate index must align with the context (and
+#'   future) index of `y`. Tsibble rows are taken in index order, and
+#'   implicit gaps in a regular tsibble are filled with missing values; the
+#'   keys of a keyed tsibble covariate are matched to the series of `y` by
+#'   value.
 #' @param h horizon in steps
-#' @param observation_mask optional logical shaped like `y`; FALSE marks
+#' @param observation_mask optional logical shaped like `y` (for a tsibble
+#'   `y`, a tsibble with logical measured variables); FALSE or NA marks
 #'   additional missing values
 #' @param past_covariates known over the context only (T time rows, or the
 #'   batch forms described for `y`)
@@ -427,7 +440,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   inputs[!mask] <- 0
   cfg <- model$config
   get_cov <- function(x, len, nm, cat = FALSE) {
-    out <- .as_cov_batch(x, tg$B, len, nm, cat)
+    out <- .as_cov_batch(x, tg$B, len, nm, cat, tg$snames)
     if (!is.null(out) && !cfg$covariate_enabled)
       stop("this checkpoint was not trained with covariates; got ", nm)
     idx <- attr(out, "index")
