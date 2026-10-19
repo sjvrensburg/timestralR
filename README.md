@@ -36,11 +36,14 @@ fc <- timestral_forecast(m, Y, h = 96, past_covariates = P, known_covariates = K
 ## Validation
 
 Parity against the official PyTorch package (`timestral` 1.0.0, torch
-2.14.1 CPU, fp32 weights), six cases (missing values, negative trend
-without mirroring, multivariate, covariates, horizon 1100, context 5000
-capped to 4096 with horizon 2100), where `max_rel` is max abs difference
-over all quantiles/steps/variates relative to the largest official
-forecast value:
+2.14.1 CPU, fp32 weights), twelve cases (missing values, negative trend
+without mirroring, multivariate, numeric covariates, horizon 1100,
+context 5000 capped to 4096 with horizon 2100, batch of 3, observation
+mask, categorical past/known/multivariate, non-default forecaster
+knobs), where `max_rel` is max abs difference over all
+quantiles/steps/variates relative to the largest official forecast
+value. Synthetic config variants (biases, gate-less, no-asinh) also
+match to < 2.3e-7; see `docs/developer-notes.md`:
 
 | model | worst max_rel (case) | R time, worst case |
 |---|---|---|
@@ -54,5 +57,9 @@ users never need Python).
 
 ## Not yet supported
 
-Categorical covariates (target encoding), batching several independent
-series in one call (one series, possibly multivariate, per call).
+Nothing in the Python package's inference surface: batched series,
+observation masks, numeric and categorical covariates, and all
+forecaster/loader options are supported. (Training and GPU execution are
+Python-side concerns with no R analogue.) Developer notes, including the
+frozen internal interface for a future native port, are in
+`docs/developer-notes.md`.

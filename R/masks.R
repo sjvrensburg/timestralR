@@ -81,17 +81,19 @@
 }
 
 .build_variate_mask <- function(key_valid, n_dec, target_rows = NULL,
-                                bidirectional_rows = NULL) {
+                                bidirectional_rows = NULL, groups = NULL) {
   R <- nrow(key_valid)
   if (R == 1L) return(NULL)
+  if (is.null(groups)) groups <- rep(1L, R)
   n_enc <- ncol(key_valid)
   slot_valid <- cbind(key_valid, matrix(TRUE, R, n_dec))
   S <- n_enc + n_dec
   forbid <- .variate_firewall(R, target_rows, bidirectional_rows)
+  row_eq <- outer(groups, groups, `==`)
   out <- array(FALSE, dim = c(S, R, R))
   for (s in seq_len(S)) {
-    m <- matrix(slot_valid[, s], R, R, byrow = FALSE)  # key (column) validity
-    m <- t(m)  # rows = queries, cols = keys: key validity varies by column
+    ## rows = queries, cols = keys: key validity varies by column
+    m <- matrix(slot_valid[, s], R, R, byrow = TRUE) & row_eq
     if (!is.null(forbid)) m <- m & !forbid
     diag(m) <- TRUE
     out[s, , ] <- m
@@ -99,19 +101,22 @@
   out
 }
 
-.group_first_observed_patch <- function(obs_per_patch) {
-  any_obs <- apply(obs_per_patch, 2, any)
-  idx <- which(any_obs)
-  if (length(idx) == 0L) 0L else idx[1] - 1L
+.group_first_observed_patch <- function(obs_per_patch, groups = NULL) {
+  if (is.null(groups)) groups <- rep(1L, nrow(obs_per_patch))
+  vapply(seq_len(nrow(obs_per_patch)), function(r) {
+    any_obs <- apply(obs_per_patch[groups == groups[r], , drop = FALSE], 2, any)
+    idx <- which(any_obs)
+    if (length(idx) == 0L) 0L else idx[1] - 1L
+  }, integer(1))
 }
 
 .build_forecast_positions <- function(n_ctx, horizon, first_obs, R) {
   p <- seq_len(n_ctx + horizon) - 1L
-  matrix(p - first_obs, R, n_ctx + horizon, byrow = TRUE)
+  matrix(p, R, n_ctx + horizon, byrow = TRUE) - first_obs
 }
 
 .build_two_stream_positions <- function(n_patches, first_obs, R) {
   p <- seq_len(n_patches) - 1L
-  row <- p - first_obs
-  matrix(c(row, row), R, 2L * n_patches, byrow = TRUE)
+  base <- matrix(p, R, n_patches, byrow = TRUE) - first_obs
+  cbind(base, base)
 }

@@ -1,7 +1,7 @@
 Package: timestralR
 Type: Package
 Title: Zero-Shot Probabilistic Forecasting with Timestral
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
     email = "sjansevanrensburg@gmail.com")
 Description: Runs Mistral AI's Timestral time-series foundation models from R

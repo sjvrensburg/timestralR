@@ -28,34 +28,49 @@
        m = cbind(matrix(FALSE, nrow(inputs), pad), mask))
 }
 
+## inputs/mask: (B, V, T) arrays; past/known: lists of (C, L) matrices per
+## series (NULL entries allowed). Rows are packed series-major, as upstream.
 .assemble_rows <- function(model, inputs, mask, h, past, known) {
   ps <- model$config$patch_size
-  n_tgt <- nrow(inputs)
+  B <- dim(inputs)[1]; n_tgt <- dim(inputs)[2]; T_len <- dim(inputs)[3]
   horizon <- ceiling(h / ps) * ps
-  ctx_rows <- list(.ffill_rows(inputs, mask))
-  ctx_masks <- list(mask)
-  roles <- rep(0L, n_tgt)
-  n_past <- 0L
-  if (!is.null(past)) {
-    n_past <- nrow(past)
-    ctx_masks <- c(ctx_masks, list(!is.na(past)))
-    ctx_rows <- c(ctx_rows, list(.nan_to_num(past)))
-    roles <- c(roles, rep(1L, n_past))
+  rows_list <- list(); mask_list <- list()
+  roles_all <- integer(0); groups <- integer(0)
+  kf_blocks <- list()
+  n_past <- if (is.null(past) || is.null(past[[1]])) 0L else nrow(past[[1]])
+  n_known <- if (is.null(known) || is.null(known[[1]])) 0L else nrow(known[[1]])
+  target_idx <- integer(0)
+  for (b in seq_len(B)) {
+    ib <- matrix(inputs[b, , ], nrow = n_tgt)
+    mb <- matrix(mask[b, , ], nrow = n_tgt)
+    ctx_rows <- list(.ffill_rows(ib, mb))
+    ctx_masks <- list(mb)
+    roles <- rep(0L, n_tgt)
+    if (!is.null(past) && !is.null(past[[b]]) && nrow(past[[b]]) > 0) {
+      ctx_masks <- c(ctx_masks, list(!is.na(past[[b]])))
+      ctx_rows <- c(ctx_rows, list(.nan_to_num(past[[b]])))
+      roles <- c(roles, rep(1L, nrow(past[[b]])))
+    }
+    kf_b <- NULL
+    if (!is.null(known) && !is.null(known[[b]]) && nrow(known[[b]]) > 0) {
+      kn <- known[[b]]
+      kc_ctx <- kn[, seq_len(T_len), drop = FALSE]
+      kc_fut <- kn[, T_len + seq_len(h), drop = FALSE]
+      ctx_masks <- c(ctx_masks, list(!is.na(kc_ctx)))
+      ctx_rows <- c(ctx_rows, list(.nan_to_num(kc_ctx)))
+      roles <- c(roles, rep(2L, nrow(kn)))
+      kf_b <- list(vals = .nan_to_num(kc_fut), obs = !is.na(kc_fut))
+    }
+    rows_b <- do.call(rbind, ctx_rows)
+    target_idx <- c(target_idx, length(rows_list) * 0L + (sum(vapply(rows_list, NROW, integer(1))) + seq_len(n_tgt)))
+    rows_list[[b]] <- rows_b
+    mask_list[[b]] <- do.call(rbind, ctx_masks)
+    roles_all <- c(roles_all, roles)
+    groups <- c(groups, rep(b, nrow(rows_b)))
+    kf_blocks[[b]] <- kf_b
   }
-  n_known <- 0L
-  kf_vals <- NULL; kf_obs <- NULL
-  if (!is.null(known)) {
-    n_known <- nrow(known)
-    kc_ctx <- known[, seq_len(ncol(inputs)), drop = FALSE]
-    kc_fut <- known[, ncol(inputs) + seq_len(h), drop = FALSE]
-    ctx_masks <- c(ctx_masks, list(!is.na(kc_ctx)))
-    ctx_rows <- c(ctx_rows, list(.nan_to_num(kc_ctx)))
-    roles <- c(roles, rep(2L, n_known))
-    kf_obs <- !is.na(kc_fut)
-    kf_vals <- .nan_to_num(kc_fut)
-  }
-  rows <- do.call(rbind, ctx_rows)
-  msk <- do.call(rbind, ctx_masks)
+  rows <- do.call(rbind, rows_list)
+  msk <- do.call(rbind, mask_list)
   if (ncol(rows) > model$max_context) {
     keep <- (ncol(rows) - model$max_context + 1L):ncol(rows)
     rows <- rows[, keep, drop = FALSE]
@@ -68,13 +83,21 @@
     v_all <- nrow(rows)
     known_future <- matrix(0, v_all, horizon)
     known_future_mask <- matrix(FALSE, v_all, horizon)
-    k0 <- n_tgt + n_past
-    known_future[k0 + seq_len(n_known), seq_len(h)] <- kf_vals
-    known_future_mask[k0 + seq_len(n_known), seq_len(h)] <- kf_obs
+    pos <- 0L
+    for (b in seq_len(B)) {
+      v_b <- sum(groups == b)
+      if (!is.null(kf_blocks[[b]])) {
+        k0 <- pos + n_tgt + n_past
+        known_future[k0 + seq_len(n_known), seq_len(h)] <- kf_blocks[[b]]$vals
+        known_future_mask[k0 + seq_len(n_known), seq_len(h)] <- kf_blocks[[b]]$obs
+      }
+      pos <- pos + v_b
+    }
   }
-  list(rows = rows, mask = msk, role_ids = if (n_past + n_known > 0L) roles else NULL,
+  list(rows = rows, mask = msk,
+       role_ids = if (n_past + n_known > 0L) roles_all else NULL,
        known_future = known_future, known_future_mask = known_future_mask,
-       n_tgt = n_tgt)
+       n_tgt = n_tgt, n_series = B, groups = groups, target_idx = target_idx)
 }
 
 .advancing_frames <- function(model, context, mask, sinh_median) {
@@ -149,18 +172,18 @@
   remaining <- ceiling(h / ps)
   offset <- 0L
   while (remaining > 0) {
-    block <- min(32L, remaining)
+    block <- min(model$per_shot_horizon_patches, remaining)
     blen <- block * ps
     kf <- if (!is.null(asm$known_future)) asm$known_future[, offset + seq_len(blen), drop = FALSE] else NULL
     kfm <- if (!is.null(asm$known_future_mask)) asm$known_future_mask[, offset + seq_len(blen), drop = FALSE] else NULL
-    q <- .predict_block(model, context, mask, block, role_ids, kf, kfm)
+    q <- .predict_block(model, context, mask, block, role_ids, kf, kfm, asm$groups)
     q <- .refine_block(model, q, context, mask, target_rows)
     blocks[[length(blocks) + 1L]] <- q
     remaining <- remaining - block
     offset <- offset + blen
     if (remaining <= 0) break
     feedback <- matrix(q[, , med_idx], nrow = nrow(context))
-    feedback[!is.finite(feedback) | abs(feedback) >= 1e30] <- 0
+    feedback[!is.finite(feedback) | abs(feedback) >= model$extreme_value_threshold] <- 0
     feedback_mask <- matrix(TRUE, nrow(feedback), ncol(feedback))
     if (!is.null(role_ids)) {
       if (!is.null(kf)) {
@@ -193,7 +216,7 @@
   ps <- model$config$patch_size
   V <- dim(quantiles)[1]
   st <- .causal_patch_loc_scale(inputs, mask, ps, model$config$minimum_scale)
-  anchor <- st$scale[, ncol(inputs)] * 1e4
+  anchor <- st$scale[, ncol(inputs)] * model$quantile_real_cap_k
   for (v in seq_len(V)) {
     obs <- mask[v, ]
     hi <- if (any(obs)) max(inputs[v, obs]) else 0
@@ -206,80 +229,227 @@
 .forecast_raw <- function(model, inputs, mask, h, past, known) {
   asm <- .assemble_rows(model, inputs, mask, h, past, known)
   packed <- .block_ar_decode(model, asm, h)
-  q <- packed[seq_len(asm$n_tgt), , , drop = FALSE]
-  tgt_rows <- asm$rows[seq_len(asm$n_tgt), , drop = FALSE]
-  tgt_mask <- asm$mask[seq_len(asm$n_tgt), , drop = FALSE]
-  q <- .cap_quantiles(model, q, tgt_rows, tgt_mask)
-  if (any(is.nan(q))) stop("forecast produced NaN values; the input may be degenerate")
-  q
+  q <- packed[asm$target_idx, , , drop = FALSE]
+  if (model$quantile_real_cap_k > 0) {
+    tgt_rows <- asm$rows[asm$target_idx, , drop = FALSE]
+    tgt_mask <- asm$mask[asm$target_idx, , drop = FALSE]
+    q <- .cap_quantiles(model, q, tgt_rows, tgt_mask)
+  }
+  if (any(is.nan(q)))
+    stop("forecast produced ", sum(is.nan(q)),
+         " NaN values; the input is degenerate")
+  dim(q) <- c(asm$n_tgt, asm$n_series, dim(q)[2], dim(q)[3])
+  aperm(q, c(2, 1, 3, 4))
 }
 
-.as_target_rows <- function(y) {
+## Normalise y to a (B, V, T) array. Accepted forms: numeric vector (B=V=1),
+## ts/mts, matrix/data frame with time in rows (B=1), 3-D array
+## (time, variate, series), or a list of per-series vectors/matrices.
+.as_batch <- function(y) {
   tsp_y <- if (stats::is.ts(y)) stats::tsp(y) else NULL
+  if (is.list(y) && !is.data.frame(y)) {
+    parts <- lapply(y, function(elt) {
+      m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
+      storage.mode(m) <- "double"
+      m
+    })
+    Ts <- vapply(parts, nrow, integer(1)); Vs <- vapply(parts, ncol, integer(1))
+    if (length(unique(Ts)) != 1L || length(unique(Vs)) != 1L)
+      stop("all series in a batch must have the same length and variate count")
+    arr <- array(0, c(Ts[1], Vs[1], length(parts)))
+    for (b in seq_along(parts)) arr[, , b] <- parts[[b]]
+    return(list(arr = aperm(arr, c(3, 2, 1)), vnames = colnames(parts[[1]]),
+                tsp = tsp_y, T = Ts[1], V = Vs[1], B = length(parts),
+                snames = names(y)))
+  }
+  if (is.array(y) && length(dim(y)) == 3L) {
+    storage.mode(y) <- "double"
+    return(list(arr = aperm(y, c(3, 2, 1)), vnames = dimnames(y)[[2]],
+                tsp = tsp_y, T = dim(y)[1], V = dim(y)[2], B = dim(y)[3],
+                snames = dimnames(y)[[3]]))
+  }
   ym <- if (is.null(dim(y))) matrix(as.numeric(y), ncol = 1) else as.matrix(y)
-  list(rows = t(ym), names = colnames(ym), tsp = tsp_y, n = nrow(ym))
+  storage.mode(ym) <- "double"
+  arr <- aperm(array(ym, c(nrow(ym), ncol(ym), 1)), c(3, 2, 1))
+  list(arr = arr, vnames = colnames(ym), tsp = tsp_y, T = nrow(ym),
+       V = ncol(ym), B = 1L, snames = NULL)
 }
 
-.as_cov_rows <- function(x, expected_rows, name) {
+## Covariates to a list of (C, L) matrices, one per series. Forms mirror y:
+## vector/matrix (time in rows) for B=1, 3-D array (time, covariate, series),
+## or a list of per-series matrices.
+.as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE) {
   if (is.null(x)) return(NULL)
-  if (is.data.frame(x)) x <- as.matrix(x)
-  if (is.null(dim(x))) x <- matrix(as.numeric(x), ncol = 1)
-  if (nrow(x) != expected_rows)
-    stop(name, " must have ", expected_rows, " rows (time in rows), got ", nrow(x))
-  t(x)
+  one <- function(elt) {
+    m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
+    storage.mode(m) <- "double"
+    if (nrow(m) != expected_len)
+      stop(name, " must have ", expected_len, " rows (time in rows), got ", nrow(m))
+    t(m)
+  }
+  out <- if (is.list(x) && !is.data.frame(x)) {
+    if (length(x) != B) stop(name, " list must have one entry per series (", B, ")")
+    lapply(x, one)
+  } else if (is.array(x) && length(dim(x)) == 3L) {
+    if (dim(x)[3] != B) stop(name, " must have ", B, " series, got ", dim(x)[3])
+    lapply(seq_len(B), function(b) one(x[, , b]))
+  } else {
+    if (B != 1L) stop(name, " must be a list or 3-D array for a batch of ", B)
+    list(one(x))
+  }
+  Cs <- vapply(out, nrow, integer(1))
+  if (length(unique(Cs)) != 1L)
+    stop(name, " must have the same covariate count for every series")
+  if (Cs[1] == 0L) return(NULL)
+  if (categorical && any(vapply(out, function(m) any(is.infinite(m)), logical(1))))
+    stop(name, " must hold finite codes or NaN; got an infinite value")
+  out
 }
 
-#' Forecast one (possibly multivariate) series
+.as_obs_mask <- function(observation_mask, batch) {
+  if (is.null(observation_mask)) return(NULL)
+  fake <- .as_batch(observation_mask)
+  if (!identical(dim(fake$arr), dim(batch$arr)))
+    stop("observation_mask must be shaped like the context")
+  fake$arr != 0
+}
+
+.combine_cov <- function(numeric_list, encoded_list, B) {
+  if (is.null(numeric_list) && is.null(encoded_list)) return(NULL)
+  lapply(seq_len(B), function(b) {
+    a <- if (is.null(numeric_list)) NULL else numeric_list[[b]]
+    e <- if (is.null(encoded_list)) NULL else encoded_list[[b]]
+    if (is.null(a)) return(e)
+    if (is.null(e)) return(a)
+    rbind(a, e)
+  })
+}
+
+#' Forecast one or more series
 #'
 #' @param model a `timestral_model`
-#' @param y numeric vector, `ts`, or matrix/data frame with time in rows and
-#'   one column per target variate (NA = missing). Variates are forecast jointly.
+#' @param y numeric vector, `ts`, matrix/data frame with time in rows and one
+#'   column per target variate, a 3-D array (time, variate, series), or a list
+#'   of per-series vectors/matrices (NA = missing). Variates of a series are
+#'   forecast jointly; series in a batch are forecast independently in one call.
 #' @param h horizon in steps
-#' @param past_covariates matrix with time in rows (T rows), known over the context only
-#' @param known_covariates matrix with T + h rows, known over context and horizon
+#' @param observation_mask optional logical shaped like `y`; FALSE marks
+#'   additional missing values
+#' @param past_covariates known over the context only (T time rows, or the
+#'   batch forms described for `y`)
+#' @param known_covariates known over context and horizon (T + h time rows)
+#' @param categorical_past_covariates category codes known over the context
+#'   only; target-encoded per series (used as-is when a series has several
+#'   target variates)
+#' @param categorical_known_covariates category codes over context and horizon
 #' @param symmetric average with the forecast of the mirrored series (package default)
 #' @param clip_nonnegative clip at 0 when every observed target value is >= 0
-#' @return a `timestral_forecast`: `quantiles` array (variate, horizon, level) plus metadata
+#' @return a `timestral_forecast`: for one series, `quantiles` is a
+#'   (variate, horizon, level) array; for a batch, (series, variate, horizon,
+#'   level). Plus metadata.
 #' @export
-timestral_forecast <- function(model, y, h, past_covariates = NULL, known_covariates = NULL,
+timestral_forecast <- function(model, y, h, observation_mask = NULL,
+                               past_covariates = NULL, known_covariates = NULL,
+                               categorical_past_covariates = NULL,
+                               categorical_known_covariates = NULL,
                                symmetric = TRUE, clip_nonnegative = TRUE) {
   stopifnot(inherits(model, "timestral_model"))
-  tg <- .as_target_rows(y)
-  inputs <- tg$rows
-  storage.mode(inputs) <- "double"
+  if (length(h) != 1 || is.na(h) || h < 1)
+    stop("h (prediction_length) must be >= 1, got ", h)
+  h <- as.integer(h)
+  tg <- .as_batch(y)
+  inputs <- tg$arr
   mask <- is.finite(inputs)
+  om <- .as_obs_mask(observation_mask, tg)
+  if (!is.null(om)) mask <- mask & om
   inputs[!mask] <- 0
-  past <- .as_cov_rows(past_covariates, tg$n, "past_covariates")
-  known <- .as_cov_rows(known_covariates, tg$n + h, "known_covariates")
-  if (!is.null(known) && !model$config$covariate_enabled)
+  cfg <- model$config
+  get_cov <- function(x, len, nm, cat = FALSE) {
+    out <- .as_cov_batch(x, tg$B, len, nm, cat)
+    if (!is.null(out) && !cfg$covariate_enabled)
+      stop("this checkpoint was not trained with covariates; got ", nm)
+    out
+  }
+  past_num <- get_cov(past_covariates, tg$T, "past_covariates")
+  known_num <- get_cov(known_covariates, tg$T + h, "known_covariates")
+  cat_past <- get_cov(categorical_past_covariates, tg$T,
+                      "categorical_past_covariates", TRUE)
+  cat_known <- get_cov(categorical_known_covariates, tg$T + h,
+                       "categorical_known_covariates", TRUE)
+  enc_past <- .encode_categorical_batch(model, cat_past, inputs, mask, tg$B, tg$T)
+  enc_known <- .encode_categorical_batch(model, cat_known, inputs, mask, tg$B, tg$T)
+  ## Encoded categorical rows for the context come from the past encoding;
+  ## for known covariates the encoding already spans context + horizon.
+  past <- .combine_cov(past_num, enc_past, tg$B)
+  known <- .combine_cov(known_num, enc_known, tg$B)
+  if (!is.null(known) && !cfg$supports_known_covariates)
     stop("this checkpoint cannot condition on known-future covariates")
-  q <- .forecast_raw(model, inputs, mask, as.integer(h), past, known)
+  q <- .forecast_raw(model, inputs, mask, h, past, known)
   if (isTRUE(symmetric)) {
-    neg_past <- if (is.null(past)) NULL else -past
-    neg_known <- if (is.null(known)) NULL else -known
-    mirrored <- .forecast_raw(model, -inputs, mask, as.integer(h), neg_past, neg_known)
-    q <- 0.5 * (q + (-mirrored)[, , rev(seq_len(dim(q)[3])), drop = FALSE])
+    negate <- function(lst) if (is.null(lst)) NULL else lapply(lst, function(m) -m)
+    mirrored <- .forecast_raw(model, -inputs, mask, h, negate(past), negate(known))
+    q <- 0.5 * (q + (-mirrored)[, , , rev(seq_len(dim(q)[4])), drop = FALSE])
   }
   if (isTRUE(clip_nonnegative)) {
-    for (v in seq_len(nrow(inputs))) {
-      obs <- mask[v, ]
-      if (any(obs) && all(inputs[v, obs] >= 0)) q[v, , ] <- pmax(q[v, , ], 0)
+    for (b in seq_len(tg$B)) for (v in seq_len(tg$V)) {
+      obs <- mask[b, v, ]
+      if (any(obs) && all(inputs[b, v, obs] >= 0)) q[b, v, , ] <- pmax(q[b, v, , ], 0)
     }
   }
-  vnames <- tg$names
-  if (is.null(vnames)) vnames <- paste0("V", seq_len(nrow(inputs)))
-  dimnames(q) <- list(variate = vnames, step = seq_len(h),
-                      level = format(timestral_levels()))
-  structure(list(quantiles = q, levels = timestral_levels(), h = as.integer(h),
-                 tsp = tg$tsp, n = tg$n), class = "timestral_forecast")
+  vnames <- tg$vnames
+  if (is.null(vnames)) vnames <- paste0("V", seq_len(tg$V))
+  snames <- tg$snames
+  if (is.null(snames)) snames <- paste0("S", seq_len(tg$B))
+  if (tg$B == 1L) {
+    q1 <- q[1, , , , drop = FALSE]
+    dim(q1) <- dim(q1)[2:4]
+    dimnames(q1) <- list(variate = vnames, step = seq_len(h),
+                         level = format(timestral_levels()))
+    out_q <- q1
+  } else {
+    dimnames(q) <- list(series = snames, variate = vnames, step = seq_len(h),
+                        level = format(timestral_levels()))
+    out_q <- q
+  }
+  structure(list(quantiles = out_q, levels = timestral_levels(), h = h,
+                 tsp = tg$tsp, n = tg$T, n_series = tg$B),
+            class = "timestral_forecast")
+}
+
+.level_slice <- function(fc, idx) {
+  if (fc$n_series == 1L) fc$quantiles[, , idx, drop = FALSE]
+  else fc$quantiles[, , , idx, drop = FALSE]
+}
+
+#' Median forecast
+#' @param fc a `timestral_forecast`
+#' @export
+timestral_median <- function(fc) {
+  .level_slice(fc, which(fc$levels == 0.5))
+}
+
+#' Forecast at one quantile level
+#' @param fc a `timestral_forecast`
+#' @param level one of `timestral_levels()`
+#' @export
+timestral_quantile <- function(fc, level) {
+  if (length(level) != 1 || !level %in% fc$levels)
+    stop("level ", level, " is not one of the model's quantile levels")
+  .level_slice(fc, match(level, fc$levels))
 }
 
 #' @export
 print.timestral_forecast <- function(x, ...) {
-  cat("<timestral_forecast> ", dim(x$quantiles)[1], " variate(s), h = ", x$h,
-      ", 21 quantiles\n", sep = "")
-  med <- x$quantiles[, , "0.50", drop = FALSE][, , 1]
-  print(utils::head(t(rbind(med)), 6))
+  d <- dim(x$quantiles)
+  if (x$n_series == 1L) {
+    cat("<timestral_forecast> ", d[1], " variate(s), h = ", x$h,
+        ", 21 quantiles\n", sep = "")
+    med <- x$quantiles[, , "0.50", drop = FALSE][, , 1]
+    print(utils::head(t(rbind(med)), 6))
+  } else {
+    cat("<timestral_forecast> ", x$n_series, " series x ", d[2],
+        " variate(s), h = ", x$h, ", 21 quantiles\n", sep = "")
+  }
   invisible(x)
 }
 
@@ -287,12 +457,24 @@ print.timestral_forecast <- function(x, ...) {
 #' @param fc a `timestral_forecast`
 #' @export
 as_forecast_df <- function(fc) {
-  d <- dim(fc$quantiles)
-  out <- expand.grid(step = seq_len(d[2]), variate = dimnames(fc$quantiles)$variate,
-                     stringsAsFactors = FALSE)[, c("variate", "step")]
-  mat <- do.call(rbind, lapply(seq_len(d[1]), function(v) fc$quantiles[v, , ]))
-  colnames(mat) <- sprintf("q%02d", round(100 * fc$levels))
-  out <- cbind(out, mat)
-  if (!is.null(fc$tsp)) out$time <- fc$tsp[2] + out$step / fc$tsp[3]
-  out
+  q <- fc$quantiles
+  if (fc$n_series == 1L) {
+    d <- dim(q)
+    out <- expand.grid(step = seq_len(d[2]), variate = dimnames(q)$variate,
+                       stringsAsFactors = FALSE)[, c("variate", "step")]
+    mat <- do.call(rbind, lapply(seq_len(d[1]), function(v) q[v, , ]))
+    colnames(mat) <- sprintf("q%02d", round(100 * fc$levels))
+    out <- cbind(out, mat)
+    if (!is.null(fc$tsp)) out$time <- fc$tsp[2] + out$step / fc$tsp[3]
+    return(out)
+  }
+  d <- dim(q)
+  frames <- lapply(seq_len(d[1]), function(b) {
+    out <- expand.grid(step = seq_len(d[3]), variate = dimnames(q)$variate,
+                       stringsAsFactors = FALSE)[, c("variate", "step")]
+    mat <- do.call(rbind, lapply(seq_len(d[2]), function(v) q[b, v, , ]))
+    colnames(mat) <- sprintf("q%02d", round(100 * fc$levels))
+    cbind(series = dimnames(q)$series[b], out, mat, stringsAsFactors = FALSE)
+  })
+  do.call(rbind, frames)
 }

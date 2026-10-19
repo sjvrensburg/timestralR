@@ -35,10 +35,7 @@
 }
 
 .read_config <- function(path) {
-  cfg <- jsonlite::fromJSON(path)
-  cfg$quantile_knots <- as.numeric(cfg$quantile_knots)
-  cfg$block_schedule <- as.character(cfg$block_schedule)
-  cfg
+  .validate_config(jsonlite::fromJSON(path))
 }
 
 #' Quantile levels returned by every Timestral forecast
@@ -54,23 +51,32 @@ timestral_levels <- function() {
 #' Downloads `config.json` and `model.safetensors` (cached per user). The
 #' weights are Mistral AI's, released under their Modified MIT licence.
 #' @param size one of "5M", "28M", "123M", "209M"
+#' @param revision Hub revision (branch, tag or commit); default "main"
 #' @param cache_dir where to keep the files
+#' @param local_files_only only read from the cache, never download
 #' @export
 timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
-                               cache_dir = tools::R_user_dir("timestralR", "cache")) {
+                               revision = "main",
+                               cache_dir = tools::R_user_dir("timestralR", "cache"),
+                               local_files_only = FALSE) {
   size <- match.arg(size)
-  dest_dir <- file.path(cache_dir, tolower(size))
+  dest_dir <- file.path(cache_dir, tolower(size), revision)
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   for (f in c("config.json", "model.safetensors")) {
     dest <- file.path(dest_dir, f)
     if (!file.exists(dest)) {
-      url <- sprintf("https://huggingface.co/mistralai/Timestral-%s/resolve/main/%s",
-                     size, f)
+      if (local_files_only)
+        stop("checkpoint not in cache and local_files_only = TRUE: ", dest)
+      url <- sprintf("https://huggingface.co/mistralai/Timestral-%s/resolve/%s/%s",
+                     size, revision, f)
       old <- options(timeout = max(600, getOption("timeout")))
       on.exit(options(old), add = TRUE)
       tmp <- paste0(dest, ".part")
-      utils::download.file(url, tmp, mode = "wb", quiet = TRUE)
-      if (!file.rename(tmp, dest)) stop("download failed: ", url)
+      token <- Sys.getenv("HF_TOKEN", "")
+      headers <- if (nzchar(token)) c(Authorization = paste("Bearer", token)) else NULL
+      status <- utils::download.file(url, tmp, mode = "wb", quiet = TRUE,
+                                     headers = headers)
+      if (status != 0 || !file.rename(tmp, dest)) stop("download failed: ", url)
     }
   }
   dest_dir
@@ -79,12 +85,30 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 #' Load a Timestral model
 #' @param model a size ("5M", ...) to download/cache, or a local directory
 #'   holding `config.json` and `model.safetensors`
-#' @param max_context context cap in steps (models accept up to 32768;
-#'   attention cost grows quadratically, so the default stays at 4096)
+#' @param max_context context cap in steps; NULL (default) uses the trained
+#'   context length from the checkpoint, as in the Python package
+#' @param per_shot_horizon_patches patches decoded per block (capped at the
+#'   trained block size)
+#' @param quantile_real_cap_k clamp forecasts to the observed context range
+#'   plus/minus this multiple of the last patch scale; 0 disables
+#' @param extreme_value_threshold fed-back medians at or above this magnitude
+#'   become 0
+#' @param revision Hub revision when `model` is a size
+#' @param cache_dir checkpoint cache directory when `model` is a size
+#' @param local_files_only only read from the cache, never download
 #' @export
-timestral_load <- function(model = "5M", max_context = 4096L) {
+timestral_load <- function(model = "5M", max_context = NULL,
+                           per_shot_horizon_patches = 32L,
+                           quantile_real_cap_k = 1e4,
+                           extreme_value_threshold = 1e30,
+                           revision = "main",
+                           cache_dir = tools::R_user_dir("timestralR", "cache"),
+                           local_files_only = FALSE) {
+  if (per_shot_horizon_patches < 1)
+    stop("per_shot_horizon_patches must be >= 1, got ", per_shot_horizon_patches)
   dir <- if (model %in% .sizes) {
-    timestral_download(model)
+    timestral_download(model, revision = revision, cache_dir = cache_dir,
+                       local_files_only = local_files_only)
   } else if (dir.exists(model)) {
     normalizePath(model)
   } else {
@@ -93,8 +117,12 @@ timestral_load <- function(model = "5M", max_context = 4096L) {
   }
   cfg <- .read_config(file.path(dir, "config.json"))
   wts <- .read_f32_tensors(file.path(dir, "model.safetensors"))
+  .check_weights(wts, cfg)
   structure(list(weights = wts, config = cfg, dir = dir,
-                 max_context = as.integer(max_context)),
+                 max_context = if (is.null(max_context)) cfg$context_length else as.integer(max_context),
+                 per_shot_horizon_patches = min(as.integer(per_shot_horizon_patches), cfg$block_size),
+                 quantile_real_cap_k = quantile_real_cap_k,
+                 extreme_value_threshold = extreme_value_threshold),
             class = "timestral_model")
 }
 
