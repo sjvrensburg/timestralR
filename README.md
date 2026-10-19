@@ -33,7 +33,10 @@ timestral_median(fc)                         # a ts, starting Jan 1961
 fc$quantiles                                 # array: variate x step x 21 levels
 head(as_forecast_df(fc))                     # tidy long format (with time column)
 # ts/mts, zoo and xts inputs keep their time index; covariates with a time
-# index are checked for alignment with y.
+# index are checked for alignment with y. Also works with the tidyverts:
+# tsibble input (keys = batch, measured variables = variates),
+# ggplot2::autoplot(fc), tsibble::as_tsibble(fc), fabletools::as_fable(fc),
+# and as a fable model: model(TIMESTRAL(value, model = m))
 # multivariate (columns = variates), past-only and known-future covariates
 # (time in rows; known covariates need T + h rows):
 fc <- timestral_forecast(m, Y, h = 96, past_covariates = P, known_covariates = K)

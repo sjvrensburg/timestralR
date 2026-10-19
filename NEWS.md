@@ -1,3 +1,17 @@
+# timestralR 0.5.0
+
+- tidyverts support (all via Suggests, no new hard dependencies):
+  `tsibble` input to `timestral_forecast()` (keys become the batch,
+  measured variables the jointly forecast variates; tsibble covariates
+  supported) and a `tsibble::as_tsibble()` method for forecasts;
+  `ggplot2::autoplot()`/`autolayer()` fan-chart methods; and a fable
+  interface — a `TIMESTRAL()` model definition for
+  `fabletools::model()` (univariate response, per-key contexts,
+  21-quantile distributional forecasts) plus a
+  `fabletools::as_fable()` method converting forecasts to `fbl_ts`.
+  S3 methods for these generics are registered conditionally when the
+  owning package is loaded.
+
 # timestralR 0.4.0
 
 - R workflow support: forecasts keep the observed history and the time

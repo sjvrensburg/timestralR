@@ -141,6 +141,49 @@ if (requireNamespace("xts", quietly = TRUE)) {
   fc_x <- timestral_forecast(m, yx, h = 12)
   stopifnot(identical(fc_x$future_index, idx[length(idx)] + 1:12))
 }
+
+## tsibble input/output (optional package)
+if (requireNamespace("tsibble", quietly = TRUE)) {
+  idx <- as.Date("2021-01-01") + 0:(length(y) - 1)
+  d <- tsibble::as_tsibble(
+    data.frame(t = idx, value = y), index = t)
+  fc_tb <- timestral_forecast(m, d, h = 12)
+  fc_ref <- timestral_forecast(m, y, h = 12)
+  stopifnot(max(abs(fc_tb$quantiles - fc_ref$quantiles)) < 1e-12)
+  stopifnot(identical(fc_tb$index_var, "t"))
+  ft <- tsibble::as_tsibble(fc_tb)
+  stopifnot(inherits(ft, "tbl_ts"),
+            identical(tsibble::index_var(ft), "t"), nrow(ft) == 12L)
+  d2 <- tsibble::as_tsibble(
+    data.frame(grp = rep(c("a", "b"), each = length(y)), t = rep(idx, 2),
+               v1 = c(y, rev(y)), v2 = c(rev(y), y)),
+    index = t, key = grp)
+  fc_tb2 <- timestral_forecast(m, d2, h = 12)
+  stopifnot(identical(dim(fc_tb2$quantiles), c(2L, 2L, 12L, 21L)))
+}
+
+## ggplot2 methods (optional package)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  fc_gg <- timestral_forecast(m, y, h = 12)
+  p <- ggplot2::autoplot(fc_gg)
+  stopifnot(inherits(p, "ggplot"))
+  invisible(ggplot2::ggplot_build(p))
+  stopifnot(is.list(ggplot2::autolayer(fc_gg)))
+}
+
+## fable model + as_fable (optional packages)
+if (requireNamespace("fable", quietly = TRUE) &&
+    requireNamespace("tsibble", quietly = TRUE)) {
+  suppressMessages(library(fable))
+  train_ts <- tsibble::as_tsibble(
+    data.frame(t = as.Date("2021-01-01") + 0:(length(y) - 1), value = y),
+    index = t)
+  fit <- fabletools::model(train_ts, tm = TIMESTRAL(value, model = m))
+  fcf <- fabletools::forecast(fit, h = 6)
+  stopifnot(fabletools::is_fable(fcf), all(is.finite(fcf$.mean)))
+  fb <- fabletools::as_fable(timestral_forecast(m, y_ts, h = 6))
+  stopifnot(fabletools::is_fable(fb))
+}
 cat("fixture tests passed\n")
 
 ## optional full checkpoint

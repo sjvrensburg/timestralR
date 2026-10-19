@@ -311,6 +311,19 @@
 ## or a list of per-series matrices.
 .as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE) {
   if (is.null(x)) return(NULL)
+  if (inherits(x, "tbl_ts")) {
+    gr <- .tsibble_groups(x)
+    if (length(gr$groups) != B)
+      stop(name, " tsibble must have one key group per series (", B, ")")
+    out <- lapply(gr$groups, function(m) {
+      if (nrow(m) != expected_len)
+        stop(name, " must have ", expected_len, " rows (time in rows), got ",
+             nrow(m))
+      t(m)
+    })
+    attr(out, "index") <- gr$index
+    return(out)
+  }
   cov_index <- NULL
   one <- function(elt) {
     st <- .strip_time_index(elt)
@@ -344,7 +357,7 @@
 
 .as_obs_mask <- function(observation_mask, batch) {
   if (is.null(observation_mask)) return(NULL)
-  fake <- .as_batch(observation_mask)
+  fake <- .batch_dispatch(observation_mask)
   if (!identical(dim(fake$arr), dim(batch$arr)))
     stop("observation_mask must be shaped like the context")
   fake$arr != 0
@@ -364,7 +377,9 @@
 #' Forecast one or more series
 #'
 #' @param model a `timestral_model`
-#' @param y numeric vector, `ts`/`mts`, `zoo`/`xts` (index preserved), matrix
+#' @param y numeric vector, `ts`/`mts`, `zoo`/`xts` (index preserved), a
+#'   `tsibble` (keys become the batch, measured variables the jointly
+#'   forecast variates), matrix
 #'   or data frame with time in rows and one column per target variate, a 3-D
 #'   array (time, variate, series), or a list of per-series vectors/matrices
 #'   (NA = missing). Variates of a series are forecast jointly; series in a
@@ -399,7 +414,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   if (length(h) != 1 || is.na(h) || h < 1)
     stop("h (prediction_length) must be >= 1, got ", h)
   h <- as.integer(h)
-  tg <- .as_batch(y)
+  tg <- .batch_dispatch(y)
   future_idx <- .future_index(tg$index, h)
   inputs <- tg$arr
   mask <- is.finite(inputs)
@@ -470,7 +485,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   structure(list(quantiles = out_q, levels = timestral_levels(), h = h,
                  tsp = tg$tsp, n = tg$T, n_series = tg$B,
                  observed = observed_arr, index = tg$index,
-                 future_index = future_idx),
+                 index_var = tg$index_var, future_index = future_idx),
             class = "timestral_forecast")
 }
 
