@@ -17,3 +17,4 @@
 
 - Keep the forward pass in base R on R's BLAS; do not add a Python, torch, or external-runtime dependency for end users.
 - Keep parity checks in `inst/` as developer-only scripts; the package itself must run without Python.
+- Keep native and BLAS code single-threaded: no OpenMP, thread pools, or setting BLAS thread counts. Users parallelise at the R level, and nested threading causes oversubscription inside their parallel workers.

@@ -37,6 +37,18 @@ here), below that Eigen's own kernels are used. The threshold was tuned
 by benchmark (5e5 was slower on 209M, 2e7 a wash) — a tuned BLAS is not
 always better, particularly on the many medium products in attention.
 
+The context-only path keeps a single-entry K/V cache in the session
+(`KVCache` in `src/timestral_eigen.cpp`): when a `.ts_predict_block` call's
+context extends the cached context bit-for-bit (same rows, groups, and
+first-observed patches), earlier patches' per-layer K/V are reused and
+only appended patches plus decode tokens are computed. This is exact
+(causal masks/scaler, positions depend only on the first observed patch);
+multi-block native vs R agreement on 209M is ~4e-13. It cannot help once
+the decode loop truncates the context at `max_context`: positions are
+relative to the context start, so a sliding window invalidates cached K.
+Cache memory is capped at 256 MB (estimated); above that the call falls
+back to a full compute.
+
 Benchmarks (`inst/benchmark.R`, this machine):
 
 | size | backend | univariate | long horizon | context cap | batch 10 |
@@ -55,6 +67,13 @@ knobs): worst `max_rel` 2.0e-6 on 5M (gate: < 2e-5). 123M: 9.6e-6, 209M:
 2.6e-6 on the original six cases. Synthetic config variants (biases,
 no gates, no asinh, alternate schedules) in `inst/synthetic_parity.R`:
 < 2.3e-7.
+
+Threading constraint: the native backend must stay single-threaded — no
+OpenMP, thread pools, or setting BLAS thread counts. R users routinely
+embed package calls in their own parallel code (`parallel`, `future`,
+etc.), and nested C++/BLAS threading oversubscribes cores inside their
+workers. Speed work must therefore be algorithmic or single-threaded
+kernel work, never added parallelism.
 
 Remaining profiling note: inside the native block, attention score/softmax
 loops are the next target if more speed is needed; the R-side refinement

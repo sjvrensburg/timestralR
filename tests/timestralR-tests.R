@@ -37,6 +37,23 @@ fc2_R <- timestral_forecast(m_R, y2, h = 24, past_covariates = matrix(pa, ncol =
                             known_covariates = matrix(kn, ncol = 1))
 stopifnot(max(abs(fc2_R$quantiles - fc2$quantiles)) < 1e-10)
 
+## multi-block decode (native K/V cache across blocks) agrees with R;
+## the second variant truncates the context mid-decode, forcing cache misses
+m_mb <- timestral_load(file.path(fx, "tiny"), max_context = 4096L,
+                       per_shot_horizon_patches = 1L)
+m_mb_R <- timestral_load(file.path(fx, "tiny"), max_context = 4096L,
+                         per_shot_horizon_patches = 1L, backend = "R")
+fc_mb <- timestral_forecast(m_mb, y, h = 48)
+fc_mb_R <- timestral_forecast(m_mb_R, y, h = 48)
+stopifnot(max(abs(fc_mb_R$quantiles - fc_mb$quantiles)) < 1e-10)
+m_tr <- timestral_load(file.path(fx, "tiny"), max_context = 32L,
+                       per_shot_horizon_patches = 1L)
+m_tr_R <- timestral_load(file.path(fx, "tiny"), max_context = 32L,
+                         per_shot_horizon_patches = 1L, backend = "R")
+fc_tr <- timestral_forecast(m_tr, y, h = 48)
+fc_tr_R <- timestral_forecast(m_tr_R, y, h = 48)
+stopifnot(max(abs(fc_tr_R$quantiles - fc_tr$quantiles)) < 1e-10)
+
 ## batch consistency: batched series equal one-at-a-time forecasts
 yb <- list(y, y2, rev(y))
 fcb <- timestral_forecast(m, yb, h = 24)

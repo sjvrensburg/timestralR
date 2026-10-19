@@ -40,10 +40,32 @@ struct Cfg {
   }
 };
 
+// Cross-block K/V cache for the context-only decode path. The R decode
+// loop (.block_ar_decode) issues one .ts_predict_block call per block with
+// the median feedback appended to the context. Because the time mask is
+// causal, the scaler is causal, and positions depend only on the first
+// observed patch, an earlier context patch's per-layer K/V cannot change
+// when later patches are appended; if the new inputs extend the cached
+// inputs exactly (same rows/groups/first-observed), the cached K/V are
+// reused and only the appended patches plus the new decode tokens are run
+// through the transformer. K/V are stored per layer and row as (ll, D) in
+// head-block layout, K after RoPE. Single-entry: an interleaved different
+// sequence (e.g. the mirrored forecast) simply misses and rebuilds.
+struct KVCache {
+  bool valid = false;
+  int T = 0, ll = 0;
+  MatrixXd inputs;
+  MaskMat observed;
+  std::vector<int> groups;
+  std::vector<int> first_obs;
+  std::vector<std::vector<MatrixXd>> K, V;  // [layer][row]
+};
+
 struct Session {
   Cfg cfg;
   std::unordered_map<std::string, RowMat> mats;
   std::unordered_map<std::string, VectorXd> vecs;
+  mutable KVCache cache;
   bool has_mat(const std::string& n) const { return mats.count(n) > 0; }
   bool has_vec(const std::string& n) const { return vecs.count(n) > 0; }
   const RowMat& mat(const std::string& n) const { return mats.at(n); }
@@ -320,12 +342,19 @@ MatrixXd head_slice(const MatrixXd& qkv, int idx, int h, int nh, int hd) {
   return out;
 }
 
+// Time attention for the active tokens of one row. `mask` covers active
+// queries x all S_total = pos0 + S keys. When `cache` is set, keys/values
+// for the pos0 earlier context tokens come from the cache at this layer,
+// and the first n_enc_active active tokens (new context patches) have
+// their K/V appended to the cache.
 MatrixXd attn_time_row(const Session& s, const MatrixXd& X, const std::string& prefix,
-                       const MaskM& mask, const MatrixXd& cosr, const MatrixXd& sinr) {
+                       const MaskM& mask, const MatrixXd& cosr, const MatrixXd& sinr,
+                       KVCache* cache, int layer, int row, int pos0, int n_enc_active) {
   int S = X.rows(), D = X.cols();
   int nh = s.cfg.num_heads, hd = s.cfg.head_dim();
+  int S_total = pos0 + S;
   MatrixXd qkv = lin(s, X, prefix + ".wQKV.weight");
-  std::vector<MatrixXd> heads;
+  MatrixXd o(S, D);
   for (int h = 0; h < nh; ++h) {
     MatrixXd q = head_slice(qkv, 0, h, nh, hd);
     MatrixXd k = head_slice(qkv, 1, h, nh, hd);
@@ -338,11 +367,23 @@ MatrixXd attn_time_row(const Session& s, const MatrixXd& X, const std::string& p
     };
     q = q.cwiseProduct(cosr) + rot(q).cwiseProduct(sinr);
     k = k.cwiseProduct(cosr) + rot(k).cwiseProduct(sinr);
-    MatrixXd scores = (q * k.transpose()) / std::sqrt((double)hd);
-    heads.push_back(softmax_rows(scores, &mask) * v);
+    if (cache && n_enc_active > 0) {
+      cache->K[layer][row].block(pos0, h * hd, n_enc_active, hd) = k.topRows(n_enc_active);
+      cache->V[layer][row].block(pos0, h * hd, n_enc_active, hd) = v.topRows(n_enc_active);
+    }
+    if (cache && pos0 > 0) {
+      MatrixXd kall(S_total, hd), vall(S_total, hd);
+      kall.topRows(pos0) = cache->K[layer][row].block(0, h * hd, pos0, hd);
+      kall.bottomRows(S) = k;
+      vall.topRows(pos0) = cache->V[layer][row].block(0, h * hd, pos0, hd);
+      vall.bottomRows(S) = v;
+      MatrixXd scores = (q * kall.transpose()) / std::sqrt((double)hd);
+      o.block(0, h * hd, S, hd) = softmax_rows(scores, &mask) * vall;
+    } else {
+      MatrixXd scores = (q * k.transpose()) / std::sqrt((double)hd);
+      o.block(0, h * hd, S, hd) = softmax_rows(scores, &mask) * v;
+    }
   }
-  MatrixXd o(S, D);
-  for (int h = 0; h < nh; ++h) o.block(0, h * hd, S, hd) = heads[h];
   if (s.has_mat(prefix + "._gate.weight")) {
     MatrixXd g = lin(s, X, prefix + "._gate.weight");
     o = o.cwiseProduct(g.unaryExpr([](double v) { return sigmoid(v); }));
@@ -372,12 +413,18 @@ MatrixXd attn_variate_slot(const Session& s, const MatrixXd& X,
   return lin(s, o, prefix + ".wO.weight");
 }
 
+// H holds the active tokens only: global token indices pos0..pos0+S-1.
+// time_mask/variate_mask/positions are indexed by global token index.
+// When `cache` is set, the first n_enc_active active tokens are new
+// context patches whose K/V are appended to the cache.
 std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
                                   const std::vector<MaskM>& time_mask,
                                   const std::vector<MaskM>& variate_mask,
-                                  const MatrixXd& positions) {
+                                  const MatrixXd& positions,
+                                  KVCache* cache, int pos0, int n_enc_active) {
   const Cfg& cfg = s.cfg;
   int R = (int)H.size(), S = (int)H[0].rows(), hd = cfg.head_dim();
+  int S_total = pos0 + S;
   int rope_dim = cfg.rope_dim();
   std::vector<double> inv_freq(hd / 2, 0.0);
   for (int i = 0, idx = 0; idx < rope_dim; idx += 2, ++i)
@@ -386,7 +433,7 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
   for (int r = 0; r < R; ++r)
     for (int i = 0; i < S; ++i)
       for (int d = 0; d < hd; ++d) {
-        double f = positions(r, i) * inv_freq[d % (hd / 2)];
+        double f = positions(r, pos0 + i) * inv_freq[d % (hd / 2)];
         cosr[r](i, d) = std::cos(f);
         sinr[r](i, d) = std::sin(f);
       }
@@ -401,14 +448,17 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
       std::vector<MatrixXd> xn = H;
       rms_norm_rows(xn, s.vec(np + ".scale"), cfg.norm_eps);
       if (axes[ai]) {
-        for (int r = 0; r < R; ++r)
-          H[r] += attn_time_row(s, xn[r], ap, time_mask[r], cosr[r], sinr[r]);
+        for (int r = 0; r < R; ++r) {
+          MaskM sub = time_mask[r].block(pos0, 0, S, S_total);
+          H[r] += attn_time_row(s, xn[r], ap, sub, cosr[r], sinr[r],
+                                cache, (int)li, r, pos0, n_enc_active);
+        }
       } else {
         std::vector<MatrixXd> out(R, MatrixXd::Zero(S, cfg.d_model));
         for (int sl = 0; sl < S; ++sl) {
           MatrixXd x(R, cfg.d_model);
           for (int r = 0; r < R; ++r) x.row(r) = xn[r].row(sl);
-          const MaskM* mk = variate_mask.empty() ? nullptr : &variate_mask[sl];
+          const MaskM* mk = variate_mask.empty() ? nullptr : &variate_mask[pos0 + sl];
           MatrixXd o = attn_variate_slot(s, x, ap, mk);
           for (int r = 0; r < R; ++r) out[r].row(sl) = o.row(r);
         }
@@ -433,16 +483,19 @@ std::vector<MatrixXd> transformer(const Session& s, std::vector<MatrixXd> H,
 
 // ---- patch embedding, head, predict_block ------------------------------------
 
-std::vector<MatrixXd> patch_embed(const Session& s, const MatrixXd& scaled,
-                                  const MaskMat& observed) {
+// Patch embedding for patches [p0, p1) only (the cache path embeds just
+// the appended patches; earlier patches' tokens are already encoded).
+std::vector<MatrixXd> patch_embed_range(const Session& s, const MatrixXd& scaled,
+                                        const MaskMat& observed, int p0, int p1) {
   const int ps = s.cfg.patch_size;
-  int R = scaled.rows(), T = scaled.cols(), N = T / ps;
+  int R = scaled.rows(), N = p1 - p0;
+  if (N <= 0) return std::vector<MatrixXd>(R, MatrixXd(0, s.cfg.d_model));
   MatrixXd tokens(R * N, 2 * ps);
   for (int r = 0; r < R; ++r)
     for (int p = 0; p < N; ++p)
       for (int k = 0; k < ps; ++k) {
-        tokens(r * N + p, k) = scaled(r, p * ps + k);
-        tokens(r * N + p, ps + k) = observed(r, p * ps + k) ? 0.0 : 1.0;
+        tokens(r * N + p, k) = scaled(r, (p0 + p) * ps + k);
+        tokens(r * N + p, ps + k) = observed(r, (p0 + p) * ps + k) ? 0.0 : 1.0;
       }
   MatrixXd out = residual_block(s, tokens,
       "representation.patch_proj.hidden_layer.weight",
@@ -451,6 +504,11 @@ std::vector<MatrixXd> patch_embed(const Session& s, const MatrixXd& scaled,
   std::vector<MatrixXd> H(R, MatrixXd(N, s.cfg.d_model));
   for (int r = 0; r < R; ++r) H[r] = out.block(r * N, 0, N, s.cfg.d_model);
   return H;
+}
+
+std::vector<MatrixXd> patch_embed(const Session& s, const MatrixXd& scaled,
+                                  const MaskMat& observed) {
+  return patch_embed_range(s, scaled, observed, 0, scaled.cols() / s.cfg.patch_size);
 }
 
 std::vector<MatrixXd> forecast_tokens(const Session& s, int R, int n_patches) {
@@ -489,18 +547,21 @@ MatrixXd monotone_head(const Session& s, const MatrixXd& tokens_dec) {
   return out;
 }
 
+// x_enc holds encoder tokens starting at global token index pos0 (only
+// the appended patches on a cache hit; all of them otherwise).
 std::vector<MatrixXd> run_two_stream(const Session& s, const std::vector<MatrixXd>& x_enc,
                                      const std::vector<MatrixXd>& x_dec,
                                      const std::vector<MaskM>& time_mask,
                                      const std::vector<MaskM>& variate_mask,
-                                     const MatrixXd& positions) {
+                                     const MatrixXd& positions,
+                                     KVCache* cache, int pos0) {
   int R = (int)x_enc.size(), n_enc = (int)x_enc[0].rows(), n_dec = (int)x_dec[0].rows();
   std::vector<MatrixXd> H(R, MatrixXd(n_enc + n_dec, s.cfg.d_model));
   for (int r = 0; r < R; ++r) {
     H[r].topRows(n_enc) = x_enc[r];
     H[r].bottomRows(n_dec) = x_dec[r];
   }
-  H = transformer(s, H, time_mask, variate_mask, positions);
+  H = transformer(s, H, time_mask, variate_mask, positions, cache, pos0, n_enc);
   std::vector<MatrixXd> out(R);
   for (int r = 0; r < R; ++r) out[r] = monotone_head(s, H[r].bottomRows(n_dec));
   return out;
@@ -538,8 +599,6 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
   const int ps = s.cfg.patch_size;
   int R = inputs.rows(), T = inputs.cols(), ll = T / ps, h = horizon_patches;
   ScaleOut sc = model_scale(s, inputs, observed);
-  auto x_enc = patch_embed(s, sc.scaled, observed);
-  auto x_dec = forecast_tokens(s, R, h);
   MaskM obp = obs_per_patch(observed, ps);
   MaskM kv = enc_key_validity(obp, s.cfg.attend_missing);
   auto tm = forecast_time_mask(ll, h, kv);
@@ -548,7 +607,46 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
   MatrixXd positions(R, ll + h);
   for (int r = 0; r < R; ++r)
     for (int i = 0; i < ll + h; ++i) positions(r, i) = i - fo[r];
-  auto preds = run_two_stream(s, x_enc, x_dec, tm, vm, positions);
+  // Cache decision: reuse is exact iff the new context extends the cached
+  // one bit-for-bit with the same grouping and first-observed patches.
+  KVCache& cache = s.cache;
+  const int n_layers = (int)s.cfg.block_schedule.size();
+  const double est_bytes = (double)n_layers * R * ll * s.cfg.d_model * 2 * sizeof(double);
+  int pos0 = 0;
+  KVCache* ctx = nullptr;
+  if (est_bytes <= 256.0 * 1024 * 1024) {
+    bool hit = cache.valid && cache.ll <= ll && cache.T <= T &&
+               cache.inputs.rows() == R && cache.groups == groups &&
+               cache.first_obs == fo;
+    if (hit)
+      for (int r = 0; r < R && hit; ++r)
+        for (int t = 0; t < cache.T; ++t)
+          if (inputs(r, t) != cache.inputs(r, t) ||
+              observed(r, t) != cache.observed(r, t)) { hit = false; break; }
+    if (hit) {
+      pos0 = cache.ll;
+      for (int li = 0; li < n_layers; ++li)
+        for (int r = 0; r < R; ++r) {
+          MatrixXd nk(ll, s.cfg.d_model), nv(ll, s.cfg.d_model);
+          nk.setZero(); nv.setZero();
+          nk.topRows(cache.ll) = cache.K[li][r];
+          nv.topRows(cache.ll) = cache.V[li][r];
+          cache.K[li][r] = nk; cache.V[li][r] = nv;
+        }
+    } else {
+      cache.K.assign(n_layers, std::vector<MatrixXd>(R, MatrixXd::Zero(ll, s.cfg.d_model)));
+      cache.V.assign(n_layers, std::vector<MatrixXd>(R, MatrixXd::Zero(ll, s.cfg.d_model)));
+    }
+    ctx = &cache;
+  }
+  auto x_enc = patch_embed_range(s, sc.scaled, observed, pos0, ll);
+  auto x_dec = forecast_tokens(s, R, h);
+  auto preds = run_two_stream(s, x_enc, x_dec, tm, vm, positions, ctx, pos0);
+  if (ctx) {
+    cache.inputs = inputs; cache.observed = observed;
+    cache.groups = groups; cache.first_obs = fo;
+    cache.T = T; cache.ll = ll; cache.valid = true;
+  }
   VectorXd al(R), as(R);
   for (int r = 0; r < R; ++r) { al(r) = sc.loc(r, T - 1); as(r) = sc.scale(r, T - 1); }
   return denormalize(s, preds, al, as);
@@ -576,7 +674,7 @@ std::vector<MatrixXd> predict_window(const Session& s, const MatrixXd& full_inpu
   MatrixXd positions(R, 2 * n);
   for (int r = 0; r < R; ++r)
     for (int i = 0; i < 2 * n; ++i) positions(r, i) = (i % n) - fo[r];
-  auto preds_all = run_two_stream(s, x_enc, x_dec, tm, vm, positions);
+  auto preds_all = run_two_stream(s, x_enc, x_dec, tm, vm, positions, nullptr, 0);
   std::vector<MatrixXd> preds(R);
   for (int r = 0; r < R; ++r) preds[r] = preds_all[r].block(ll * ps, 0, h * ps, (int)s.cfg.knots.size());
   VectorXd al(R), as(R);
