@@ -32,6 +32,13 @@
   implementation files (`session`, `nn_ops`, `scaler`, `masks`,
   `attention`, `transformer`, `head`, `predict`, plus the Rcpp entry
   points); outputs are bit-for-bit unchanged.
+- New vignette, `vignette("timestralR")`, covering every feature with
+  plots (precomputed from `vignettes/timestralR.Rmd.orig`; rebuild with
+  `vignettes/precompile.R`).
+- `autoplot()`/`autolayer()` draw opaque bands in graded blues, widest
+  first, matching `plot()` (any fill scale still overrides them), and
+  facet variates in input order. A list of series that share a time
+  index keeps it, and a named list no longer leaks a name into `dim()`.
 
 # timestralR 0.4.0
 

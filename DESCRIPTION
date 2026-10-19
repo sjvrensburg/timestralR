@@ -16,7 +16,9 @@ Encoding: UTF-8
 Depends: R (>= 4.0.0)
 Imports: jsonlite, utils, tools, stats, Rcpp (>= 1.0.0)
 Suggests: zoo, xts, tsibble, ggplot2, fabletools, distributional,
-    tidyselect, fable, rlang
+    tidyselect, fable, rlang, knitr, rmarkdown, patchwork, dplyr, feasts,
+    ggtime
+VignetteBuilder: knitr
 LinkingTo: Rcpp, RcppEigen
 SystemRequirements: None beyond R itself; model weights are downloaded on
     first use from huggingface.co (Mistral AI, Modified MIT licence).

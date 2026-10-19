@@ -27,6 +27,9 @@ is Apache 2.0.
 
 ## Use
 
+The vignette walks through every feature with plots:
+`vignette("timestralR")`.
+
 ```r
 library(timestralR)
 m  <- timestral_load("28M")                  # or a local checkpoint directory
