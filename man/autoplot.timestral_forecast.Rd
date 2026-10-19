@@ -1,0 +1,34 @@
+\name{autoplot.timestral_forecast}
+\alias{autoplot.timestral_forecast}
+\alias{autolayer.timestral_forecast}
+\title{ggplot2 fan chart of a Timestral forecast}
+\usage{
+\method{autoplot}{timestral_forecast}(object, series = 1L,
+  levels = c(0.5, 0.8, 0.9, 0.98), ...)
+
+\method{autolayer}{timestral_forecast}(object, series = 1L,
+  levels = c(0.5, 0.8, 0.9, 0.98), ...)
+}
+\arguments{
+\item{object}{a \code{timestral_forecast}}
+\item{series}{which series of a batch to plot (default 1)}
+\item{levels}{central predictive intervals to draw as bands; each must
+correspond to a pair of available quantile knots}
+\item{...}{ignored}
+}
+\value{For \code{autoplot}, a \code{ggplot}; for \code{autolayer}, a list
+of layers.}
+\description{
+Registered as S3 methods for \code{ggplot2::autoplot()} and
+\code{ggplot2::autolayer()} when ggplot2 is available. \code{autoplot}
+draws the observed history, the median, and nested predictive interval
+bands; \code{autolayer} adds just the forecast bands and median to an
+existing ggplot (for example of the observed series).
+}
+\examples{
+\dontrun{
+m <- timestral_load("5M")
+fc <- timestral_forecast(m, AirPassengers, h = 24)
+ggplot2::autoplot(fc)
+}
+}

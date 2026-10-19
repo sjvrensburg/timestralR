@@ -1,7 +1,7 @@
 Package: timestralR
 Type: Package
 Title: Zero-Shot Probabilistic Forecasting with Timestral
-Version: 0.4.0
+Version: 0.5.0
 Authors@R: person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
     email = "sjansevanrensburg@gmail.com")
 URL: https://github.com/sjvrensburg/timestralR
@@ -14,7 +14,8 @@ Description: Runs Mistral AI's Timestral time-series foundation models from R
 License: Apache License (>= 2)
 Encoding: UTF-8
 Imports: jsonlite, utils, tools, stats, Rcpp (>= 1.0.0)
-Suggests: zoo, xts
+Suggests: zoo, xts, tsibble, ggplot2, fabletools, distributional,
+    tidyselect, fable, rlang
 LinkingTo: Rcpp, RcppEigen
 SystemRequirements: None beyond R itself; model weights are downloaded on
     first use from huggingface.co (Mistral AI, Modified MIT licence).

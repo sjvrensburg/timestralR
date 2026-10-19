@@ -1,6 +1,6 @@
 useDynLib(timestralR, .registration = TRUE)
 importFrom(Rcpp, evalCpp)
-export(timestral_load, timestral_forecast, timestral_download, as_forecast_df, timestral_levels, timestral_median, timestral_quantile)
+export(timestral_load, timestral_forecast, timestral_download, as_forecast_df, timestral_levels, timestral_median, timestral_quantile, TIMESTRAL)
 S3method(print, timestral_model)
 S3method(print, timestral_forecast)
 S3method(plot, timestral_forecast)
