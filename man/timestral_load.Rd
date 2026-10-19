@@ -28,3 +28,10 @@ implementation. Results are identical up to floating-point order.}
 }
 \value{A \code{timestral_model} object.}
 \description{Load a Timestral model from the official Mistral AI checkpoint.}
+\examples{
+\dontrun{
+m <- timestral_load("5M")
+fc <- timestral_forecast(m, AirPassengers, h = 24)
+plot(fc)
+}
+}

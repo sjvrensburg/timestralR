@@ -3,7 +3,8 @@
 Run Mistral AI's Timestral forecasting models from R — no Python, no PyTorch,
 no external runtime. The package downloads the official `safetensors`
 checkpoints from Mistral AI's Hugging Face repositories and runs the
-transformer forward pass natively in R (on R's BLAS). The forecasting loop —
+transformer forward pass in a native RcppEigen backend (a pure-R reference
+implementation is included as a fallback). The forecasting loop —
 causal per-patch normalisation, two-stream time/variate attention, block
 decoding with median feedback, mirrored averaging, quantile capping and
 clipping — is a direct port of the official `timestral` Python package.
@@ -11,7 +12,8 @@ clipping — is a direct port of the official `timestral` Python package.
 ## Install
 
 ```r
-# from a clone:
+remotes::install_github("sjvrensburg/timestralR")
+# or from a clone:
 # R CMD INSTALL timestralR   (or devtools::install())
 ```
 
@@ -26,8 +28,12 @@ code is Apache 2.0.
 library(timestralR)
 m  <- timestral_load("28M")                  # or a local checkpoint directory
 fc <- timestral_forecast(m, AirPassengers, h = 24)
+plot(fc)                                     # fan chart: history + median + bands
+timestral_median(fc)                         # a ts, starting Jan 1961
 fc$quantiles                                 # array: variate x step x 21 levels
-head(as_forecast_df(fc))
+head(as_forecast_df(fc))                     # tidy long format (with time column)
+# ts/mts, zoo and xts inputs keep their time index; covariates with a time
+# index are checked for alignment with y.
 # multivariate (columns = variates), past-only and known-future covariates
 # (time in rows; known covariates need T + h rows):
 fc <- timestral_forecast(m, Y, h = 96, past_covariates = P, known_covariates = K)
@@ -45,12 +51,15 @@ quantiles/steps/variates relative to the largest official forecast
 value. Synthetic config variants (biases, gate-less, no-asinh) also
 match to < 2.3e-7; see `docs/developer-notes.md`:
 
-| model | worst max_rel (case) | R time, worst case |
-|---|---|---|
-| 5M | 2.0e-6 (long horizon) | 0.8 s |
-| 28M | 2.9e-7 (spot check, univariate) | — |
-| 123M | 9.6e-6 (long context cap) | 8.1 s |
-| 209M | 2.6e-6 (long context cap) | 13.5 s |
+| model | worst max_rel (case) |
+|---|---|
+| 5M | 2.0e-6 (long horizon) |
+| 28M | 2.9e-7 (spot check, univariate) |
+| 123M | 9.6e-6 (long context cap) |
+| 209M | 2.6e-6 (long context cap) |
+
+Native-backend timings are in `docs/developer-notes.md` (209M: batch of 10
+in 2.3 s, long-context worst case in 5.0 s on the development machine).
 
 Reproduce with `inst/parity_official.R` (developer machine only; end
 users never need Python).

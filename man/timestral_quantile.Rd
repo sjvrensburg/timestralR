@@ -8,6 +8,14 @@ timestral_quantile(fc, level)
 \item{fc}{a \code{timestral_forecast}}
 \item{level}{one of \code{timestral_levels()}}
 }
-\value{The slice of the forecast at \code{level}.}
+\value{The requested quantile slice, as a \code{ts}/\code{mts} for a single
+series forecast from a \code{ts}, otherwise an array slice.}
 \description{Forecast at one quantile level; errors if \code{level} is not one
 of the model's quantile levels.}
+\examples{
+\dontrun{
+m <- timestral_load("5M")
+fc <- timestral_forecast(m, AirPassengers, h = 24)
+timestral_quantile(fc, 0.9)
+}
+}

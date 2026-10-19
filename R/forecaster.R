@@ -242,13 +242,44 @@
   aperm(q, c(2, 1, 3, 4))
 }
 
+## Extract a time index from ts/zoo/xts input and strip the input to
+## plain values. Returns list(values, index); index is NULL for plain
+## inputs. zoo/xts are optional (Suggests): they are only touched when
+## the user passes an object of those classes.
+.strip_time_index <- function(x) {
+  if (stats::is.ts(x))
+    return(list(values = x, index = as.numeric(stats::time(x))))
+  if (inherits(x, "xts")) {
+    if (!requireNamespace("xts", quietly = TRUE))
+      stop("xts input requires the xts package")
+    return(list(values = zoo::coredata(x), index = zoo::index(x)))
+  }
+  if (inherits(x, "zoo")) {
+    if (!requireNamespace("zoo", quietly = TRUE))
+      stop("zoo input requires the zoo package")
+    return(list(values = zoo::coredata(x), index = zoo::index(x)))
+  }
+  list(values = x, index = NULL)
+}
+
+## Future index by extending the last observed interval (any index class
+## supporting arithmetic: numeric, Date, POSIXct, ts decimal time, ...).
+.future_index <- function(index, h) {
+  if (is.null(index) || length(index) < 2L) return(NULL)
+  n <- length(index)
+  index[n] + (index[n] - index[n - 1L]) * seq_len(h)
+}
+
 ## Normalise y to a (B, V, T) array. Accepted forms: numeric vector (B=V=1),
-## ts/mts, matrix/data frame with time in rows (B=1), 3-D array
+## ts/mts, zoo/xts, matrix/data frame with time in rows (B=1), 3-D array
 ## (time, variate, series), or a list of per-series vectors/matrices.
 .as_batch <- function(y) {
   tsp_y <- if (stats::is.ts(y)) stats::tsp(y) else NULL
+  stripped <- .strip_time_index(y)
+  y <- stripped$values
   if (is.list(y) && !is.data.frame(y)) {
     parts <- lapply(y, function(elt) {
+      elt <- .strip_time_index(elt)$values
       m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
       storage.mode(m) <- "double"
       m
@@ -259,20 +290,20 @@
     arr <- array(0, c(Ts[1], Vs[1], length(parts)))
     for (b in seq_along(parts)) arr[, , b] <- parts[[b]]
     return(list(arr = aperm(arr, c(3, 2, 1)), vnames = colnames(parts[[1]]),
-                tsp = tsp_y, T = Ts[1], V = Vs[1], B = length(parts),
-                snames = names(y)))
+                tsp = tsp_y, index = NULL, T = Ts[1], V = Vs[1],
+                B = length(parts), snames = names(y)))
   }
   if (is.array(y) && length(dim(y)) == 3L) {
     storage.mode(y) <- "double"
     return(list(arr = aperm(y, c(3, 2, 1)), vnames = dimnames(y)[[2]],
-                tsp = tsp_y, T = dim(y)[1], V = dim(y)[2], B = dim(y)[3],
-                snames = dimnames(y)[[3]]))
+                tsp = tsp_y, index = NULL, T = dim(y)[1], V = dim(y)[2],
+                B = dim(y)[3], snames = dimnames(y)[[3]]))
   }
   ym <- if (is.null(dim(y))) matrix(as.numeric(y), ncol = 1) else as.matrix(y)
   storage.mode(ym) <- "double"
   arr <- aperm(array(ym, c(nrow(ym), ncol(ym), 1)), c(3, 2, 1))
-  list(arr = arr, vnames = colnames(ym), tsp = tsp_y, T = nrow(ym),
-       V = ncol(ym), B = 1L, snames = NULL)
+  list(arr = arr, vnames = colnames(ym), tsp = tsp_y, index = stripped$index,
+       T = nrow(ym), V = ncol(ym), B = 1L, snames = NULL)
 }
 
 ## Covariates to a list of (C, L) matrices, one per series. Forms mirror y:
@@ -280,7 +311,11 @@
 ## or a list of per-series matrices.
 .as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE) {
   if (is.null(x)) return(NULL)
+  cov_index <- NULL
   one <- function(elt) {
+    st <- .strip_time_index(elt)
+    if (is.null(cov_index) && !is.null(st$index)) cov_index <<- st$index
+    elt <- st$values
     m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
     storage.mode(m) <- "double"
     if (nrow(m) != expected_len)
@@ -303,6 +338,7 @@
   if (Cs[1] == 0L) return(NULL)
   if (categorical && any(vapply(out, function(m) any(is.infinite(m)), logical(1))))
     stop(name, " must hold finite codes or NaN; got an infinite value")
+  attr(out, "index") <- cov_index
   out
 }
 
@@ -328,10 +364,13 @@
 #' Forecast one or more series
 #'
 #' @param model a `timestral_model`
-#' @param y numeric vector, `ts`, matrix/data frame with time in rows and one
-#'   column per target variate, a 3-D array (time, variate, series), or a list
-#'   of per-series vectors/matrices (NA = missing). Variates of a series are
-#'   forecast jointly; series in a batch are forecast independently in one call.
+#' @param y numeric vector, `ts`/`mts`, `zoo`/`xts` (index preserved), matrix
+#'   or data frame with time in rows and one column per target variate, a 3-D
+#'   array (time, variate, series), or a list of per-series vectors/matrices
+#'   (NA = missing). Variates of a series are forecast jointly; series in a
+#'   batch are forecast independently in one call. Covariates may also be
+#'   `ts`/`zoo`/`xts`; when both `y` and a covariate carry a time index, the
+#'   covariate index must align with the context (and future) index of `y`.
 #' @param h horizon in steps
 #' @param observation_mask optional logical shaped like `y`; FALSE marks
 #'   additional missing values
@@ -346,7 +385,10 @@
 #' @param clip_nonnegative clip at 0 when every observed target value is >= 0
 #' @return a `timestral_forecast`: for one series, `quantiles` is a
 #'   (variate, horizon, level) array; for a batch, (series, variate, horizon,
-#'   level). Plus metadata.
+#'   level). Also holds the `observed` context values (with NA for missing),
+#'   and the context `index` and `future_index` when `y` carried a time
+#'   index (`ts`, `zoo`, `xts`); the future index extends the last observed
+#'   interval.
 #' @export
 timestral_forecast <- function(model, y, h, observation_mask = NULL,
                                past_covariates = NULL, known_covariates = NULL,
@@ -358,16 +400,30 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
     stop("h (prediction_length) must be >= 1, got ", h)
   h <- as.integer(h)
   tg <- .as_batch(y)
+  future_idx <- .future_index(tg$index, h)
   inputs <- tg$arr
   mask <- is.finite(inputs)
   om <- .as_obs_mask(observation_mask, tg)
   if (!is.null(om)) mask <- mask & om
+  observed_arr <- inputs
+  observed_arr[!mask] <- NA_real_
+  dimnames(observed_arr) <- list(series = tg$snames, variate = tg$vnames,
+                                 time = NULL)
   inputs[!mask] <- 0
   cfg <- model$config
   get_cov <- function(x, len, nm, cat = FALSE) {
     out <- .as_cov_batch(x, tg$B, len, nm, cat)
     if (!is.null(out) && !cfg$covariate_enabled)
       stop("this checkpoint was not trained with covariates; got ", nm)
+    idx <- attr(out, "index")
+    if (!is.null(out) && !is.null(idx) && !is.null(tg$index)) {
+      expected <- if (len == tg$T) tg$index else c(tg$index, future_idx)
+      aligned <- length(idx) == length(expected) &&
+        isTRUE(all.equal(idx, expected, check.attributes = FALSE,
+                         tolerance = 1e-8))
+      if (!aligned)
+        stop(nm, " time index does not align with the time index of y")
+    }
     out
   }
   past_num <- get_cov(past_covariates, tg$T, "past_covariates")
@@ -412,7 +468,9 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
     out_q <- q
   }
   structure(list(quantiles = out_q, levels = timestral_levels(), h = h,
-                 tsp = tg$tsp, n = tg$T, n_series = tg$B),
+                 tsp = tg$tsp, n = tg$T, n_series = tg$B,
+                 observed = observed_arr, index = tg$index,
+                 future_index = future_idx),
             class = "timestral_forecast")
 }
 
@@ -421,21 +479,38 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   else fc$quantiles[, , , idx, drop = FALSE]
 }
 
+## Present a single-series level slice as a ts/mts when the input was a
+## ts: time in rows, one column per variate, starting after the context.
+.maybe_ts <- function(fc, slice) {
+  if (fc$n_series != 1L || is.null(fc$tsp)) return(slice)
+  nv <- dim(fc$quantiles)[1]
+  m <- matrix(slice[, , 1], nrow = nv)
+  out <- stats::ts(t(m), start = fc$tsp[2] + 1 / fc$tsp[3],
+                   frequency = fc$tsp[3])
+  if (nv > 1L) colnames(out) <- dimnames(fc$quantiles)[[1L]]
+  out
+}
+
 #' Median forecast
 #' @param fc a `timestral_forecast`
+#' @return The 0.5-quantile slice. For a single series forecast from a
+#'   `ts`, a `ts`/`mts` starting after the context; otherwise the same
+#'   slice of the quantiles array as before.
 #' @export
 timestral_median <- function(fc) {
-  .level_slice(fc, which(fc$levels == 0.5))
+  .maybe_ts(fc, .level_slice(fc, which(fc$levels == 0.5)))
 }
 
 #' Forecast at one quantile level
 #' @param fc a `timestral_forecast`
 #' @param level one of `timestral_levels()`
+#' @return The requested quantile slice, as a `ts`/`mts` for a single
+#'   series forecast from a `ts`, otherwise an array slice.
 #' @export
 timestral_quantile <- function(fc, level) {
   if (length(level) != 1 || !level %in% fc$levels)
     stop("level ", level, " is not one of the model's quantile levels")
-  .level_slice(fc, match(level, fc$levels))
+  .maybe_ts(fc, .level_slice(fc, match(level, fc$levels)))
 }
 
 #' @export
@@ -465,7 +540,8 @@ as_forecast_df <- function(fc) {
     mat <- do.call(rbind, lapply(seq_len(d[1]), function(v) q[v, , ]))
     colnames(mat) <- sprintf("q%02d", round(100 * fc$levels))
     out <- cbind(out, mat)
-    if (!is.null(fc$tsp)) out$time <- fc$tsp[2] + out$step / fc$tsp[3]
+    if (!is.null(fc$future_index)) out$time <- fc$future_index[out$step]
+    else if (!is.null(fc$tsp)) out$time <- fc$tsp[2] + out$step / fc$tsp[3]
     return(out)
   }
   d <- dim(q)
@@ -474,7 +550,10 @@ as_forecast_df <- function(fc) {
                        stringsAsFactors = FALSE)[, c("variate", "step")]
     mat <- do.call(rbind, lapply(seq_len(d[2]), function(v) q[b, v, , ]))
     colnames(mat) <- sprintf("q%02d", round(100 * fc$levels))
-    cbind(series = dimnames(q)$series[b], out, mat, stringsAsFactors = FALSE)
+    out <- cbind(series = dimnames(q)$series[b], out, mat,
+                 stringsAsFactors = FALSE)
+    if (!is.null(fc$future_index)) out$time <- fc$future_index[out$step]
+    out
   })
   do.call(rbind, frames)
 }

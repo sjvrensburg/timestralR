@@ -1,3 +1,18 @@
+# timestralR 0.4.0
+
+- R workflow support: forecasts keep the observed history and the time
+  index. `ts`/`mts`, `zoo` and `xts` inputs (the latter two via
+  Suggests, no new hard dependency) preserve their index; the forecast
+  object gains `observed`, `index` and `future_index` (extending the
+  last observed interval), `as_forecast_df()` reports real index values
+  (e.g. Dates), and covariates with a time index are checked for
+  alignment with `y`. `timestral_median()`/`timestral_quantile()` now
+  return a `ts`/`mts` for a single-series `ts` forecast.
+- New `plot()` method for forecasts: fan chart with the observed
+  context, median, and 50/80/90/98% predictive bands.
+- Documentation: examples in every help page, a package-level help
+  page, and `URL`/`BugReports` in DESCRIPTION.
+
 # timestralR 0.3.1
 
 - Native backend speedups, no change to results (native vs R backend
