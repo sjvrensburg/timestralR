@@ -14,7 +14,7 @@ Description: Runs Mistral AI's Timestral time-series foundation models from R
 License: Apache License (>= 2)
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
-Imports: jsonlite, utils, tools, stats, Rcpp (>= 1.0.0)
+Imports: jsonlite, digest, utils, tools, stats, Rcpp (>= 1.0.0)
 Suggests: zoo, xts, tsibble, ggplot2, fabletools, distributional,
     tidyselect, fable, rlang, knitr, rmarkdown, patchwork, dplyr, feasts,
     ggtime

@@ -6,7 +6,7 @@
 \usage{
 timestral_download(
   size = c("5M", "28M", "123M", "209M"),
-  revision = "main",
+  revision = NULL,
   cache_dir = tools::R_user_dir("timestralR", "cache"),
   local_files_only = FALSE
 )
@@ -14,7 +14,9 @@ timestral_download(
 \arguments{
 \item{size}{one of "5M", "28M", "123M", "209M"}
 
-\item{revision}{Hub revision (branch, tag or commit); default "main"}
+\item{revision}{Hub revision (branch, tag or commit); default \code{NULL}
+uses the pinned upstream commit for \code{size}, whose files are verified
+against recorded SHA-256 hashes. Other revisions are not verified.}
 
 \item{cache_dir}{where to keep the files}
 

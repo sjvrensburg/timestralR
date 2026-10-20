@@ -1,0 +1,49 @@
+# Weekly real-checkpoint run: exercises timestral_load/timestral_forecast
+# on the actual 5M weights (the fixture tests in R-CMD-check cannot).
+# The download is hash-verified by timestral_download() at the pinned
+# upstream commit.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+name: full-checkpoint.yaml
+
+permissions: read-all
+
+jobs:
+  full-checkpoint:
+    runs-on: ubuntu-latest
+
+    name: ubuntu-latest (5M checkpoint)
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install the package
+        run: R CMD INSTALL .
+
+      - name: Cache the 5M checkpoint
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/R/timestralR
+          key: timestral-5m-pinned-v1
+
+      - name: Run the full test suite against the real 5M checkpoint
+        run: |
+          MODEL_DIR="$(Rscript -e 'cat(timestralR::timestral_download("5M"))')"
+          echo "checkpoint: $MODEL_DIR"
+          TIMESTRALR_TEST_MODEL_DIR="$MODEL_DIR" Rscript tests/timestralR-tests.R
+        shell: bash

@@ -56,6 +56,31 @@ timestral_levels <- function() {
 
 .sizes <- c("5M", "28M", "123M", "209M")
 
+## Pinned upstream commits and SHA-256 of the two checkpoint files, per
+## size (Hugging Face LFS oid for model.safetensors). Downloads at the
+## pinned revision are verified against these; a cached file that fails
+## verification is re-downloaded (or an error when local_files_only).
+.pinned_checkpoints <- list(
+  "5M" = list(
+    revision = "bdd20cfc15a3fea0e4cb5ccef37f8d3ca7aa335f",
+    sha256 = c("config.json" = "b5f27f61513f8fd1a3aa996f3720d3679cb40bce5bcb08eb3dc320ce726e7c2f",
+               "model.safetensors" = "7ace108c4987e7f2a99a75a445240019d1d31c2117139d1bd05ffdfd25aca738")),
+  "28M" = list(
+    revision = "49b26409ac87b5935539a5d8ffe7f397b720db47",
+    sha256 = c("config.json" = "0cdf44b8ea981191de53078e0a5ecbbd437046bd939a546d5dbe17868f71281f",
+               "model.safetensors" = "dfc83c6220937ce5fc6687b35a4df94cd25e28a2cfe6fb92a23dad6301b2015d")),
+  "123M" = list(
+    revision = "5a147287addda85f6acd8da3fb8858fe9af7e8f7",
+    sha256 = c("config.json" = "7bb4c042fb2d2ed6469b6758ba380dfeda3ab32df47690a87aec1527bdae79bf",
+               "model.safetensors" = "599fafa73cadbbc800b5a346ca900fa741ee3e5fd22e3b4a4430e151e74f4bc2")),
+  "209M" = list(
+    revision = "9874d252ab0aae16f7f7c999f98f98d6ad7d8365",
+    sha256 = c("config.json" = "1764139bb6d37ee5ff543f470495c086cfa6c373f7134fc61c7e3d844538bfd8",
+               "model.safetensors" = "1456effb9927e3daa8c7234f10497e3424233869245a9c72b8ecebaf7ad2b7fa")))
+
+.sha256_file <- function(path)
+  digest::digest(file = path, algo = "sha256", serialize = FALSE)
+
 #' Download a Timestral checkpoint
 #'
 #' Downloads `config.json` and `model.safetensors` from the official
@@ -63,7 +88,9 @@ timestral_levels <- function() {
 #' cached per user. Set `HF_TOKEN` for authenticated downloads.
 #'
 #' @param size one of "5M", "28M", "123M", "209M"
-#' @param revision Hub revision (branch, tag or commit); default "main"
+#' @param revision Hub revision (branch, tag or commit); default `NULL`
+#'   uses the pinned upstream commit for `size`, whose files are verified
+#'   against recorded SHA-256 hashes. Other revisions are not verified.
 #' @param cache_dir where to keep the files
 #' @param local_files_only only read from the cache, never download
 #' @return The checkpoint directory.
@@ -73,14 +100,24 @@ timestral_levels <- function() {
 #' }
 #' @export
 timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
-                               revision = "main",
+                               revision = NULL,
                                cache_dir = tools::R_user_dir("timestralR", "cache"),
                                local_files_only = FALSE) {
   size <- match.arg(size)
+  pin <- .pinned_checkpoints[[size]]
+  if (is.null(revision)) revision <- pin$revision
+  pinned <- identical(revision, pin$revision)
   dest_dir <- file.path(cache_dir, tolower(size), revision)
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   for (f in c("config.json", "model.safetensors")) {
     dest <- file.path(dest_dir, f)
+    expected <- if (pinned) unname(pin$sha256[f]) else NULL
+    if (file.exists(dest) && !is.null(expected) &&
+        !identical(.sha256_file(dest), expected)) {
+      if (local_files_only)
+        stop("cached checkpoint file fails SHA-256 verification: ", dest)
+      unlink(dest)
+    }
     if (!file.exists(dest)) {
       if (local_files_only)
         stop("checkpoint not in cache and local_files_only = TRUE: ", dest)
@@ -89,11 +126,25 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
       old <- options(timeout = max(600, getOption("timeout")))
       on.exit(options(old), add = TRUE)
       tmp <- paste0(dest, ".part")
+      unlink(tmp)
       token <- Sys.getenv("HF_TOKEN", "")
       headers <- if (nzchar(token)) c(Authorization = paste("Bearer", token)) else NULL
-      status <- utils::download.file(url, tmp, mode = "wb", quiet = TRUE,
-                                     headers = headers)
-      if (status != 0 || !file.rename(tmp, dest)) stop("download failed: ", url)
+      status <- tryCatch(
+        utils::download.file(url, tmp, mode = "wb", quiet = TRUE,
+                             headers = headers),
+        error = function(e) { unlink(tmp); stop(e) })
+      if (status != 0 || !file.exists(tmp)) {
+        unlink(tmp)
+        stop("download failed: ", url)
+      }
+      if (!is.null(expected) && !identical(.sha256_file(tmp), expected)) {
+        unlink(tmp)
+        stop("downloaded checkpoint file fails SHA-256 verification: ", url)
+      }
+      if (!file.rename(tmp, dest)) {
+        unlink(tmp)
+        stop("download failed: ", url)
+      }
     }
   }
   dest_dir
@@ -113,7 +164,8 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 #'   plus/minus this multiple of the last patch scale; 0 disables
 #' @param extreme_value_threshold fed-back medians at or above this magnitude
 #'   become 0
-#' @param revision Hub revision when `model` is a size
+#' @param revision Hub revision when `model` is a size; default `NULL`
+#'   uses the pinned, hash-verified upstream commit for the size
 #' @param cache_dir checkpoint cache directory when `model` is a size
 #' @param local_files_only only read from the cache, never download
 #' @param backend "native" (default) uses the compiled RcppEigen
@@ -131,7 +183,7 @@ timestral_load <- function(model = "5M", max_context = NULL,
                            per_shot_horizon_patches = 32L,
                            quantile_real_cap_k = 1e4,
                            extreme_value_threshold = 1e30,
-                           revision = "main",
+                           revision = NULL,
                            cache_dir = tools::R_user_dir("timestralR", "cache"),
                            local_files_only = FALSE,
                            backend = c("native", "R")) {
