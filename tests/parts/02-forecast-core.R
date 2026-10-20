@@ -1,5 +1,6 @@
 ## Batching, accessors, error validation, covariates, masks, ts/plot.
-## Sourced by tests/timestralR-tests.R; expects `m`, `m_R`, `y`, `y2`, `fc`.
+## Sourced by tests/timestralR-tests.R; expects `m`, `m_R`, `y`, `y2`, `pa`,
+## `kn`, `fc`, `fc2`, `tiny`.
 ## batch consistency: batched series equal one-at-a-time forecasts
 yb <- list(y, y2, rev(y))
 fcb <- timestral_forecast(m, yb, h = 24)
@@ -72,3 +73,54 @@ grDevices::pdf(NULL)
 plot(fc_ts)
 plot(fc)
 grDevices::dev.off()
+
+## capability helpers mirror the config and drive the covariate guards
+stopifnot(identical(timestral_supports_covariates(m),
+                    isTRUE(m$config$covariate_enabled)),
+          identical(timestral_supports_known_covariates(m),
+                    isTRUE(m$config$supports_known_covariates)),
+          timestral_supports_covariates(m),
+          timestral_supports_known_covariates(m))
+cfg_nc <- jsonlite::fromJSON(file.path(tiny, "config.json"))
+cfg_nc$covariate_enabled <- FALSE
+cfg_nc <- timestralR:::.validate_config(cfg_nc)
+m_nc <- m
+m_nc$config <- cfg_nc
+stopifnot(!timestral_supports_covariates(m_nc),
+          !timestral_supports_known_covariates(m_nc),
+          any(grepl("covariates: none", capture.output(print(m_nc)))),
+          any(grepl("covariates: past and known-future",
+                    capture.output(print(m)))))
+err <- tryCatch({
+  timestral_forecast(m_nc, y2, h = 24, past_covariates = matrix(pa, ncol = 1))
+  FALSE
+}, error = function(e) grepl("not trained with covariates", conditionMessage(e)))
+stopifnot(isTRUE(err))
+m_pk <- m
+m_pk$config$supports_known_covariates <- FALSE
+stopifnot(timestral_supports_covariates(m_pk),
+          !timestral_supports_known_covariates(m_pk),
+          any(grepl("covariates: past only", capture.output(print(m_pk)))))
+err <- tryCatch({
+  timestral_forecast(m_pk, y2, h = 24, known_covariates = matrix(kn, ncol = 1))
+  FALSE
+}, error = function(e) grepl("known-future", conditionMessage(e)))
+stopifnot(isTRUE(err))
+err <- tryCatch({ timestral_supports_covariates(list()); FALSE },
+                error = function(e) TRUE)
+stopifnot(isTRUE(err))
+
+## predict() is timestral_forecast() under the stats generic (to 1e-10:
+## repeated native calls can differ in the last bits via the K/V cache)
+pr <- predict(m, y, h = 24)
+pr_cov <- predict(m, y2, h = 24, past_covariates = matrix(pa, ncol = 1),
+                  known_covariates = matrix(kn, ncol = 1))
+stopifnot(inherits(pr, "timestral_forecast"),
+          max(abs(pr$quantiles - fc$quantiles)) < 1e-10,
+          max(abs(pr_cov$quantiles - fc2$quantiles)) < 1e-10)
+for (call in list(quote(predict(m, h = 6)), quote(predict(m, y)))) {
+  err <- tryCatch({ eval(call); FALSE },
+                  error = function(e) grepl("predict\\(\\) needs",
+                                            conditionMessage(e)))
+  stopifnot(isTRUE(err))
+}

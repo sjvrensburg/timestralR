@@ -1,4 +1,4 @@
-## Optional Suggests interfaces: zoo/xts, tsibble, ggplot2, fable.
+## Optional Suggests interfaces: zoo/xts, tsibble, ggplot2, fable, forecast.
 ## Each block skips cleanly when its package is unavailable locally;
 ## the runner fails in CI when an optional package is missing.
 ## zoo/xts input (optional packages): index and future index preserved,
@@ -167,4 +167,61 @@ if (requireNamespace("fable", quietly = TRUE) &&
   rm(list = ls(timestralR:::.model_cache), envir = timestralR:::.model_cache)
   fcf2 <- fabletools::forecast(fit2, h = 6)
   stopifnot(max(abs(fcf2$.mean - fcf1$.mean)) < 1e-10)
+}
+
+## forecast package: timestral_as_forecast() and the forecast() method give
+## a "forecast" object whose mean/intervals are the median and knot pairs;
+## levels without a knot pair (95) and non-ts forecasts are rejected;
+## accuracy() reports test-set measures
+if (requireNamespace("forecast", quietly = TRUE)) {
+  ap_tr <- window(AirPassengers, end = c(1959, 12))
+  ap_te <- window(AirPassengers, start = c(1960, 1))
+  fc_ap <- timestral_forecast(m, ap_tr, h = 12)
+  fo <- timestral_as_forecast(fc_ap)
+  stopifnot(inherits(fo, "forecast"), identical(fo$level, c(80, 98)),
+            identical(as.numeric(fo$mean), as.numeric(timestral_median(fc_ap))),
+            identical(as.numeric(fo$lower[, "80%"]),
+                      as.numeric(timestral_quantile(fc_ap, 0.1))),
+            identical(as.numeric(fo$upper[, "98%"]),
+                      as.numeric(timestral_quantile(fc_ap, 0.99))),
+            isTRUE(all.equal(stats::tsp(fo$mean), stats::tsp(ap_te))),
+            isTRUE(all.equal(stats::tsp(fo$x), stats::tsp(ap_tr))),
+            all(is.na(fo$fitted)))
+  fo2 <- forecast::forecast(m, ap_tr, h = 12)
+  stopifnot(max(abs(fo2$mean - fo$mean)) < 1e-10,
+            max(abs(fo2$upper - fo$upper)) < 1e-10)
+  fo3 <- forecast::forecast(m, ap_tr, h = 12, level = 90, symmetric = FALSE)
+  ## `...` reaches timestral_forecast(); repeated native calls agree to
+  ## ~1e-13 (K/V cache reuse), not bit-for-bit
+  stopifnot(identical(colnames(fo3$lower), "90%"),
+            max(abs(fo3$mean - timestral_median(
+              timestral_forecast(m, ap_tr, h = 12, symmetric = FALSE)))) < 1e-10)
+  acc <- forecast::accuracy(fo, ap_te)
+  stopifnot(all(is.finite(acc["Test set", c("ME", "RMSE", "MAE", "MASE")])))
+  .expect_error(timestral_as_forecast(fc_ap, level = 95), "no quantile knot")
+  ## fractions are percentages, as in the forecast package
+  stopifnot(identical(timestral_as_forecast(fc_ap, level = c(0.8, 0.98))$upper,
+                      fo$upper))
+  .expect_error(timestral_as_forecast(fc_ap, variate = NA_real_),
+                "variate must")
+  .expect_error(forecast::forecast(m, ap_tr, h = 12, fan = TRUE),
+                "unsupported argument\\(s\\).*fan")
+  .expect_error(timestral_as_forecast(timestral_forecast(m, y, h = 6)),
+                "ts time base")
+  .expect_error(forecast::forecast(m, y, h = 6), "needs a ts")
+  .expect_error(forecast::forecast(m, ap_tr), "needs `h`")
+  ## multivariate: pick a variate by name; batch: pick a series
+  fc_mv <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 6)
+  fo_mv <- timestral_as_forecast(fc_mv, variate = "fdeaths")
+  stopifnot(identical(fo_mv$series, "fdeaths"),
+            identical(as.numeric(fo_mv$mean),
+                      as.numeric(timestral_median(fc_mv)[, "fdeaths"])))
+  .expect_error(timestral_as_forecast(fc_mv, variate = "nope"), "variate must")
+  fc_b <- timestral_forecast(m, list(mdeaths, fdeaths), h = 6)
+  stopifnot(identical(as.numeric(timestral_as_forecast(fc_b, series = 2L)$mean),
+                      as.numeric(fc_b$quantiles[2, 1, , 11])))
+  ## with fabletools loaded too, both share generics::forecast and dispatch
+  ## on their own classes
+  if (requireNamespace("fabletools", quietly = TRUE))
+    stopifnot(inherits(fabletools::forecast(m, ap_tr, h = 3), "forecast"))
 }

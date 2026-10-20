@@ -558,7 +558,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   cfg <- model$config
   get_cov <- function(x, len, nm, cat = FALSE) {
     out <- .as_cov_batch(x, tg$B, len, nm, cat, tg$snames)
-    if (!is.null(out) && !cfg$covariate_enabled)
+    if (!is.null(out) && !timestral_supports_covariates(model))
       stop("this checkpoint was not trained with covariates; got ", nm)
     idx <- attr(out, "index")
     if (!is.null(out) && !is.null(idx) && !is.null(tg$index)) {
@@ -583,7 +583,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   ## for known covariates the encoding already spans context + horizon.
   past <- .combine_cov(past_num, enc_past, tg$B)
   known <- .combine_cov(known_num, enc_known, tg$B)
-  if (!is.null(known) && !cfg$supports_known_covariates)
+  if (!is.null(known) && !timestral_supports_known_covariates(model))
     stop("this checkpoint cannot condition on known-future covariates")
   ## quantile levels come from the checkpoint (fine-tuned checkpoints may
   ## use other knots than timestral_levels())
@@ -625,6 +625,33 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
             class = "timestral_forecast")
 }
 
+#' Forecast with a Timestral model through `predict()`
+#'
+#' The [stats::predict()] interface to [timestral_forecast()]. Timestral is
+#' a zero-shot model, so there is nothing fitted to predict from: `newdata`
+#' is the series to forecast (the context), not new predictor values.
+#'
+#' @param object a `timestral_model` from [timestral_load()]
+#' @param newdata the series to forecast; anything [timestral_forecast()]
+#'   accepts as `y`
+#' @param h horizon in steps (required)
+#' @param ... further arguments to [timestral_forecast()], such as
+#'   covariates, `observation_mask` or `symmetric`
+#' @return A `timestral_forecast`, exactly as from [timestral_forecast()];
+#'   use [timestral_median()] or [timestral_quantile()] for point values.
+#' @examples
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
+#' fc <- predict(m, AirPassengers, h = 12)
+#' timestral_median(fc)
+#' @export
+predict.timestral_model <- function(object, newdata, h, ...) {
+  if (missing(newdata))
+    stop("predict() needs `newdata`: the series to forecast")
+  if (missing(h))
+    stop("predict() needs `h`: the forecast horizon in steps")
+  timestral_forecast(object, newdata, h = h, ...)
+}
+
 .level_slice <- function(fc, idx) {
   if (fc$n_series == 1L) fc$quantiles[, , idx, drop = FALSE]
   else fc$quantiles[, , , idx, drop = FALSE]
@@ -632,12 +659,16 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
 
 ## Present a single-series level slice as a ts/mts when the input was a
 ## ts: time in rows, one column per variate, starting after the context.
+## A ts of forecast values starting one step after a context with `tsp`.
+.future_ts <- function(x, tsp) {
+  stats::ts(x, start = tsp[2] + 1 / tsp[3], frequency = tsp[3])
+}
+
 .maybe_ts <- function(fc, slice) {
   if (fc$n_series != 1L || is.null(fc$tsp)) return(slice)
   nv <- dim(fc$quantiles)[1]
   m <- matrix(slice[, , 1], nrow = nv)
-  out <- stats::ts(t(m), start = fc$tsp[2] + 1 / fc$tsp[3],
-                   frequency = fc$tsp[3])
+  out <- .future_ts(t(m), fc$tsp)
   if (nv > 1L) colnames(out) <- dimnames(fc$quantiles)[[1L]]
   out
 }
@@ -690,12 +721,13 @@ print.timestral_forecast <- function(x, ...) {
   d <- dim(x$quantiles)
   if (x$n_series == 1L) {
     cat("<timestral_forecast> ", d[1], " variate(s), h = ", x$h,
-        ", 21 quantiles\n", sep = "")
-    med <- x$quantiles[, , "0.50", drop = FALSE][, , 1]
+        ", ", length(x$levels), " quantiles\n", sep = "")
+    med <- x$quantiles[, , which(abs(x$levels - 0.5) < 1e-9), drop = FALSE][, , 1]
     print(utils::head(t(rbind(med)), 6))
   } else {
     cat("<timestral_forecast> ", x$n_series, " series x ", d[2],
-        " variate(s), h = ", x$h, ", 21 quantiles\n", sep = "")
+        " variate(s), h = ", x$h, ", ", length(x$levels), " quantiles\n",
+        sep = "")
   }
   invisible(x)
 }

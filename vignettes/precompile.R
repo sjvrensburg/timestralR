@@ -3,7 +3,8 @@
 ## Run from the package root after installing the package:
 ##   Rscript vignettes/precompile.R
 ## Needs the 28M checkpoint (downloaded on first use) and the packages the
-## vignette uses (ggplot2, patchwork, zoo, tsibble, dplyr, fable).
+## vignette uses (ggplot2, patchwork, zoo, tsibble, dplyr, fable, ggtime,
+## forecast).
 ## Install from a clean src/ first (roxygen2/pkgload leave -O0 objects
 ## there, which would make the timings in section 8 misleading).
 old <- setwd("vignettes")

@@ -25,7 +25,7 @@ stopifnot(dir.exists(file.path(.test_dir, "parts")))
 .part("03-regressions.R")
 
 .optional_pkgs <- c("zoo", "xts", "tsibble", "ggplot2", "fable",
-                    "fabletools", "distributional")
+                    "fabletools", "distributional", "forecast")
 .missing_optional <- .optional_pkgs[
   !vapply(.optional_pkgs, requireNamespace, logical(1), quietly = TRUE)]
 .require_optional <- identical(Sys.getenv("CI"), "true") ||

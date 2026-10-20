@@ -1,5 +1,23 @@
 # timestralR (development version)
 
+- `timestral_supports_covariates()` and
+  `timestral_supports_known_covariates()` report which covariates a
+  checkpoint can condition on (the Python forecaster's
+  `supports_covariates`/`supports_known_covariates`), and printing a
+  model shows the same.
+- `predict()` method for `timestral_model`: `predict(m, newdata, h)` is
+  `timestral_forecast(m, newdata, h)` and returns the same
+  `timestral_forecast`.
+- forecast package interface (forecast in Suggests):
+  `timestral_as_forecast()` converts a forecast from `ts` input to a
+  `"forecast"` object, and `forecast::forecast(m, y, h)` forecasts and
+  converts in one call, so `accuracy()`, `autoplot()` and the rest of the
+  forecast package work. Interval bounds are read off the quantile
+  knots, never interpolated; the default levels are 80% and 98% because
+  the official knots have no 2.5%/97.5% quantiles.
+- Printing a forecast reports the checkpoint's number of quantile levels
+  rather than always 21.
+
 - `timestral_load()` and `timestral_download()` accept any Hugging Face
   Hub repository ID (`"owner/name"`) holding a Timestral checkpoint, for
   example a fine-tuned model, as well as the four sizes. The official

@@ -20,7 +20,7 @@ Depends: R (>= 4.1.0)
 Imports: jsonlite, digest, utils, tools, stats, Rcpp (>= 1.0.0)
 Suggests: zoo, xts, tsibble, ggplot2, fabletools, distributional,
     tidyselect, fable, rlang, knitr, rmarkdown, patchwork, dplyr, feasts,
-    ggtime
+    ggtime, forecast
 VignetteBuilder: knitr
 LinkingTo: Rcpp, RcppEigen
 SystemRequirements: A C++17 compiler. Model weights are downloaded on

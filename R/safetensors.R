@@ -351,5 +351,40 @@ print.timestral_model <- function(x, ...) {
   cat("<timestral_model>", basename(x$dir), " d_model =", x$config$d_model,
       " layers =", length(x$config$block_schedule),
       " max_context =", x$max_context, "\n")
+  cat("  covariates:",
+      if (timestral_supports_known_covariates(x)) "past and known-future"
+      else if (timestral_supports_covariates(x)) "past only" else "none",
+      "\n")
   invisible(x)
+}
+
+#' Which covariates a checkpoint can condition on
+#'
+#' `timestral_supports_covariates()` is `TRUE` when the checkpoint was
+#' trained with covariates, so [timestral_forecast()] accepts
+#' `past_covariates` and `categorical_past_covariates`.
+#' `timestral_supports_known_covariates()` is `TRUE` when it can also
+#' condition on known-future covariates (`known_covariates` and
+#' `categorical_known_covariates`), which needs a block schedule that
+#' attends across variates. Both mirror the Python forecaster's
+#' `supports_covariates` and `supports_known_covariates` properties;
+#' every official checkpoint supports both.
+#'
+#' @param model a `timestral_model` from [timestral_load()]
+#' @return `TRUE` or `FALSE`.
+#' @examples
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
+#' timestral_supports_covariates(m)
+#' timestral_supports_known_covariates(m)
+#' @export
+timestral_supports_covariates <- function(model) {
+  stopifnot(inherits(model, "timestral_model"))
+  isTRUE(model$config$covariate_enabled)
+}
+
+#' @rdname timestral_supports_covariates
+#' @export
+timestral_supports_known_covariates <- function(model) {
+  stopifnot(inherits(model, "timestral_model"))
+  isTRUE(model$config$supports_known_covariates)
 }
