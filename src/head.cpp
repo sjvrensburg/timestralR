@@ -44,9 +44,10 @@ void clamp_nonfinite_rows(MatrixXd& q) {
       if (!any_fin) { mx = mn = q(i, j); any_fin = true; }
       mx = std::max(mx, q(i, j)); mn = std::min(mn, q(i, j));
     }
+    if (!any_fin) { q.row(i).setZero(); continue; }
     for (int j = 0; j < q.cols(); ++j) {
-      if (q(i, j) == std::numeric_limits<double>::infinity()) q(i, j) = any_fin ? mx : 0.0;
-      else if (q(i, j) == -std::numeric_limits<double>::infinity()) q(i, j) = any_fin ? mn : 0.0;
+      if (q(i, j) == std::numeric_limits<double>::infinity()) q(i, j) = mx;
+      else if (q(i, j) == -std::numeric_limits<double>::infinity()) q(i, j) = mn;
       if (std::isinf(q(i, j))) q(i, j) = 0.0;
     }
   }

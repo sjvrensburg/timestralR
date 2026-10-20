@@ -9,7 +9,10 @@
   hdr_len_raw <- readBin(con, "raw", n = 8L)
   if (length(hdr_len_raw) != 8L) stop("not a safetensors file: '", path, "'")
   hdr_len <- sum(as.numeric(hdr_len_raw) * 256^(0:7))
-  header <- jsonlite::fromJSON(rawToChar(readBin(con, "raw", n = hdr_len)),
+  hdr_raw <- readBin(con, "raw", n = hdr_len)
+  if (length(hdr_raw) != hdr_len)
+    stop("truncated safetensors header in '", path, "'")
+  header <- jsonlite::fromJSON(rawToChar(hdr_raw),
                                simplifyVector = FALSE)
   data_start <- 8 + hdr_len
   out <- list()
@@ -23,6 +26,9 @@
     n <- if (length(shape) == 0L) 1L else prod(shape)
     seek(con, data_start + info$data_offsets[[1]])
     vals <- readBin(con, numeric(), n = n, size = 4L, endian = "little")
+    if (length(vals) != n)
+      stop("truncated tensor ", nm, " in '", path, "': expected ", n,
+           " values, read ", length(vals))
     out[[nm]] <- if (length(shape) == 2L) {
       matrix(vals, nrow = shape[1], ncol = shape[2], byrow = TRUE)
     } else if (length(shape) <= 1L) {

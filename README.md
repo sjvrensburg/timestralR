@@ -17,8 +17,9 @@ remotes::install_github("sjvrensburg/timestralR")
 # R CMD INSTALL timestralR   (or devtools::install())
 ```
 
-Requires R (>= 4.1) with a C++17 compiler; the R dependencies are
-`jsonlite` and `Rcpp`/`RcppEigen`. `zoo`, `xts`, `tsibble`, `ggplot2`,
+Requires R (>= 4.1) with a C++17 compiler; the hard R dependencies are
+`jsonlite` and `Rcpp`/`RcppEigen`, plus the base packages `utils`,
+`tools` and `stats`. `zoo`, `xts`, `tsibble`, `ggplot2`,
 `fabletools`, `fable` and `distributional` are optional and only needed
 for the matching interfaces. Model weights are downloaded once per user
 on first use (21 MB for 5M up to 837 MB for 209M, fp32) and cached.

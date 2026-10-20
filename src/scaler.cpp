@@ -28,7 +28,7 @@ ScaleOut model_scale(const Session& s, const MatrixXd& inputs, const MaskMat& ob
     }
     for (int t = 0; t < T; ++t) { means(r, t) = mean_t[t]; scales(r, t) = scale_t[t]; }
   }
-  MatrixXd loc(R, T), scale(R, T);
+  MatrixXd loc = MatrixXd::Zero(R, T), scale = MatrixXd::Zero(R, T);
   int npatch = T / ps;
   for (int p = 0; p < npatch; ++p) {
     int last = (p + 1) * ps - 1;

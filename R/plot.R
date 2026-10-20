@@ -72,6 +72,9 @@ plot.timestral_forecast <- function(x, series = 1L,
     q <- qmat(v)
     hist_y <- obs[v, ]
     finite <- is.finite(hist_y)
+    if (!any(finite))
+      stop("no finite observed values to anchor the plot for variate ",
+           vnames[v])
     a <- max(which(finite))
     anchor_t <- times[a]; anchor_y <- hist_y[a]
     ylim <- range(c(hist_y[finite],

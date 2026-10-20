@@ -100,6 +100,38 @@ err <- tryCatch({ timestral_forecast(m, rnorm(100), 0); FALSE },
                 error = function(e) grepl("must be >= 1", conditionMessage(e)))
 stopifnot(isTRUE(err))
 
+## regression: rope_dim must not exceed head_dim (native OOB write otherwise)
+cfg_rope <- jsonlite::fromJSON(file.path(fx, "tiny", "config.json"))
+cfg_rope$rope_partial_factor <- 2.0
+err <- tryCatch({ timestralR:::.validate_config(cfg_rope); FALSE },
+                error = function(e) grepl("rope_dim", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
+## regression: truncated safetensors must error, not recycle short reads
+st_src <- file.path(fx, "tiny", "model.safetensors")
+st_bytes <- readBin(st_src, "raw", n = file.info(st_src)$size)
+st_trunc <- file.path(tempdir(), "truncated.safetensors")
+writeBin(st_bytes[seq_len(length(st_bytes) %/% 2)], st_trunc)
+err <- tryCatch({ timestralR:::.read_f32_tensors(st_trunc); FALSE },
+                error = function(e) grepl("truncated", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
+## regression: malformed native call (short groups) must error, not read OOB
+err <- tryCatch({
+  timestralR:::.ts_predict_block(m$session, matrix(rnorm(64), nrow = 2),
+                                 matrix(TRUE, 2, 32), 1L, NULL, NULL, NULL,
+                                 groups = 1L)
+  FALSE
+}, error = function(e) grepl("groups", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
+## regression: plotting an all-missing history gives a clear error
+fc_na <- timestral_forecast(m, rep(NA_real_, length(y)), h = 6)
+err <- tryCatch({
+  grDevices::pdf(NULL); plot(fc_na); grDevices::dev.off(); FALSE
+}, error = function(e) grepl("no finite observed", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
 ## categorical forecast runs and is finite
 codes <- matrix(rep(1:7, length.out = 120), ncol = 1)
 fcc <- timestral_forecast(m, y2, h = 24, categorical_past_covariates = codes[1:96, , drop = FALSE],
@@ -292,11 +324,22 @@ if (requireNamespace("fable", quietly = TRUE) &&
   stopifnot(max(abs(fcf2$.mean - fcf1$.mean)) < 1e-10)
 }
 cat("fixture tests passed\n")
+.skipped_optional <- c("zoo", "xts", "tsibble", "ggplot2", "fable",
+                       "fabletools", "distributional")[
+  !vapply(c("zoo", "xts", "tsibble", "ggplot2", "fable",
+            "fabletools", "distributional"),
+          requireNamespace, logical(1), quietly = TRUE)]
+if (length(.skipped_optional))
+  message("skipping optional-interface tests; packages not available: ",
+          paste(.skipped_optional, collapse = ", "))
 
 ## optional full checkpoint
 model_dir <- Sys.getenv("TIMESTRALR_TEST_MODEL_DIR")
-if (!nzchar(model_dir) || !file.exists(file.path(model_dir, "model.safetensors"))) {
+if (!nzchar(model_dir)) {
   message("skipping full-checkpoint tests: TIMESTRALR_TEST_MODEL_DIR not set")
+} else if (!file.exists(file.path(model_dir, "model.safetensors"))) {
+  message("skipping full-checkpoint tests: no model.safetensors in ",
+          "TIMESTRALR_TEST_MODEL_DIR (", model_dir, ")")
 } else {
   mr <- timestral_load(model_dir, max_context = 4096L)
   set.seed(1)

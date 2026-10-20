@@ -18,7 +18,7 @@ MatrixXd transformer(const Session& s, MatrixXd H,
   int S = (int)H.rows() / R, hd = cfg.head_dim();
   int S_total = pos0 + S;
   int rope_dim = cfg.rope_dim();
-  std::vector<double> inv_freq(hd / 2, 0.0);
+  std::vector<double> inv_freq((hd > rope_dim ? hd : rope_dim) / 2, 0.0);
   for (int i = 0, idx = 0; idx < rope_dim; idx += 2, ++i)
     inv_freq[i] = 1.0 / std::pow(cfg.rope_theta, (double)idx / rope_dim);
   MatrixXd cos_s(R * S, hd), sin_s(R * S, hd);
