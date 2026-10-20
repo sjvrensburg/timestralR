@@ -112,6 +112,17 @@ etc.), and nested C++/BLAS threading oversubscribes cores inside their
 workers. Speed work must therefore be algorithmic or single-threaded
 kernel work, never added parallelism.
 
-Remaining profiling note: inside the native block, attention score/softmax
-loops are the next target if more speed is needed; the R-side refinement
-(`R/forecaster.R`) and scaler are minor.
+Profiling note (209M, temporary in-code timers, since removed): the
+`lin` GEMMs dominate every benchmark case (roughly 80–95% of the summed
+section time); attention scores, softmax and the probability×V products
+together are at most ~12% (long-context-cap case) and ~4% elsewhere.
+Within softmax, masked entries (causal/missing bias of -1e30) now skip
+the `exp` call — the result is exactly 0 there, and an all-masked row
+keeps the uniform probabilities — which halved softmax time (0.24 s ->
+0.13 s on the long-context-cap case) for a ~2% end-to-end gain, with
+bit-identical outputs. Two measured dead ends: fusing the bias add into
+scalar max/exp passes, and a transposed (keys x queries) softmax layout,
+both lost to the original Eigen row passes plus libm `exp`. More speed
+must come from the GEMM side or from doing less work, not from the
+softmax loops; the R-side refinement (`R/forecaster.R`) and scaler are
+minor.
