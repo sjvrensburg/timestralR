@@ -315,8 +315,11 @@ if (requireNamespace("fable", quietly = TRUE) &&
   fit <- fabletools::model(train_ts, tm = TIMESTRAL(value, model = m))
   mdl <- fit$tm[[1]]$fit
   stopifnot(is.null(mdl$model), is.list(mdl$handle))
-  ## a serialised mable stays small and forecasts after the cache is cleared
-  stopifnot(length(serialize(fit, NULL)) < length(serialize(m$weights, NULL)))
+  ## the fitted model holds only the handle, not the weights (assert on
+  ## mdl itself: the mable also carries fabletools' model definition,
+  ## whose serialised size depends on the caller's environment), and it
+  ## forecasts after the cache is cleared
+  stopifnot(length(serialize(mdl, NULL)) < length(serialize(m$weights, NULL)))
   fcf1 <- fabletools::forecast(fit, h = 6)
   fit2 <- unserialize(serialize(fit, NULL))
   rm(list = ls(timestralR:::.model_cache), envir = timestralR:::.model_cache)
