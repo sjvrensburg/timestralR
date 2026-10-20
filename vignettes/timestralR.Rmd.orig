@@ -44,7 +44,8 @@ This vignette covers the whole interface:
 4. missing values and observation masks;
 5. numeric and categorical covariates;
 6. time indexes from `ts`, `zoo` and `xts`;
-7. the tidyverts: `tsibble` input and output, and `fable` integration;
+7. the tidyverts (`tsibble` input and output, `fable` integration) and
+   the forecast package;
 8. options, backends, and using the package in parallel code.
 
 ```{r packages, message = FALSE}
@@ -64,14 +65,20 @@ Checkpoints come in four sizes: `"5M"`, `"28M"`, `"123M"` and `"209M"`.
 They range from 21 MB to 837 MB on disk. `timestral_load()` downloads a
 checkpoint to a per-user cache on first use; afterwards it loads from
 disk. A local directory holding `config.json` and `model.safetensors`
-also works.
+also works, as does any Hugging Face repository ID (`"owner/name"`) that
+holds a Timestral checkpoint, such as a fine-tuned model.
 
 ```{r load}
 m <- timestral_load("28M")
 m
 ```
 
-The quantile levels are the same for every forecast:
+The printout also says which covariates the checkpoint can condition
+on; `timestral_supports_covariates()` and
+`timestral_supports_known_covariates()` return the same as `TRUE` or
+`FALSE`, which is useful when code receives a checkpoint it did not
+choose. Every official checkpoint forecasts the same 21 quantile levels
+(another checkpoint's own levels are in each forecast's `fc$levels`):
 
 ```{r levels}
 timestral_levels()
@@ -86,6 +93,10 @@ Here we forecast three years of the classic airline passengers series.
 fc <- timestral_forecast(m, AirPassengers, h = 36)
 fc
 ```
+
+`predict(m, AirPassengers, h = 36)` is the same call through R's
+`predict()` generic. Timestral is zero-shot, so there is no fitted model
+to predict from: the series itself is the `newdata`.
 
 The `plot()` method draws a fan chart: the observed history, the median
 forecast, and nested 50%, 80%, 90% and 98% central intervals.
@@ -481,6 +492,34 @@ the weights:
 ```{r mable-size}
 c(mable_MB   = length(serialize(fit, NULL)) / 1e6,
   weights_MB = file.size(file.path(m$dir, "model.safetensors")) / 1e6)
+```
+
+### The forecast package
+
+The forecast package has its own `forecast()` generic, and calling it
+with a Timestral model returns a `"forecast"` object, so `accuracy()`,
+`autoplot()` and the rest of that package's tools work as for ETS or
+ARIMA. (`timestral_as_forecast()` converts a forecast you already
+have.) The intervals come straight from the quantile knots, which are
+not interpolated, so each level must pair two knots: the default is
+80% and 98%, because the 21 knots have no 2.5% and 97.5% quantiles for
+the usual 95%.
+
+```{r forecast-pkg}
+ap_train <- window(AirPassengers, end = c(1957, 12))
+ap_test  <- window(AirPassengers, start = c(1958, 1))
+fo <- forecast::forecast(m, ap_train, h = 36)
+forecast::accuracy(fo, ap_test)
+```
+
+The training-set row is empty because a zero-shot model is not fitted
+to the context, so there are no in-sample fitted values.
+
+```{r forecast-pkg-plot, fig.cap = "A Timestral forecast as a forecast-package object, with the held-out data.", fig.height = 3.5}
+autoplot(fo) +
+  autolayer(ap_test, series = "held out") +
+  labs(title = "Timestral via forecast::forecast() (80% and 98% intervals)",
+       x = NULL, y = "Passengers (thousands)", colour = NULL)
 ```
 
 ## 8. Options, backends and parallel use

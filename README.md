@@ -90,6 +90,20 @@ against the observed data. Fitted `TIMESTRAL()` models keep a handle to
 the checkpoint rather than the weights, so mables stay small when saved
 and work in parallel workers.
 
+### forecast package and `predict()`
+
+```r
+fo <- forecast::forecast(m, AirPassengers, h = 24)   # a "forecast" object
+forecast::accuracy(fo, test)                         # test-set measures
+timestral_as_forecast(fc, level = c(80, 98))         # convert an existing forecast
+predict(m, AirPassengers, h = 24)                    # same as timestral_forecast()
+timestral_supports_known_covariates(m)               # can it use known-future covariates?
+```
+
+Intervals are read off the quantile knots without interpolation, so each
+level must pair two knots: the default is 80% and 98%, since the 21
+knots have no 2.5%/97.5% quantiles for 95%.
+
 ## Validation
 
 Parity against the official PyTorch package (`timestral` 1.0.0, torch

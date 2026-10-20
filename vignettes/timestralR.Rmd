@@ -36,7 +36,8 @@ This vignette covers the whole interface:
 4. missing values and observation masks;
 5. numeric and categorical covariates;
 6. time indexes from `ts`, `zoo` and `xts`;
-7. the tidyverts: `tsibble` input and output, and `fable` integration;
+7. the tidyverts (`tsibble` input and output, `fable` integration) and
+   the forecast package;
 8. options, backends, and using the package in parallel code.
 
 
@@ -57,16 +58,23 @@ Checkpoints come in four sizes: `"5M"`, `"28M"`, `"123M"` and `"209M"`.
 They range from 21 MB to 837 MB on disk. `timestral_load()` downloads a
 checkpoint to a per-user cache on first use; afterwards it loads from
 disk. A local directory holding `config.json` and `model.safetensors`
-also works.
+also works, as does any Hugging Face repository ID (`"owner/name"`) that
+holds a Timestral checkpoint, such as a fine-tuned model.
 
 
 ```r
 m <- timestral_load("28M")
 m
-#> <timestral_model> main  d_model = 384  layers = 12  max_context = 32768
+#> <timestral_model> 49b26409ac87b5935539a5d8ffe7f397b720db47  d_model = 384  layers = 12  max_context = 32768 
+#>   covariates: past and known-future
 ```
 
-The quantile levels are the same for every forecast:
+The printout also says which covariates the checkpoint can condition
+on; `timestral_supports_covariates()` and
+`timestral_supports_known_covariates()` return the same as `TRUE` or
+`FALSE`, which is useful when code receives a checkpoint it did not
+choose. Every official checkpoint forecasts the same 21 quantile levels
+(another checkpoint's own levels are in each forecast's `fc$levels`):
 
 
 ```r
@@ -93,6 +101,10 @@ fc
 #> 5 496.5
 #> 6 576.1
 ```
+
+`predict(m, AirPassengers, h = 36)` is the same call through R's
+`predict()` generic. Timestral is zero-shot, so there is no fitted model
+to predict from: the series itself is the `newdata`.
 
 The `plot()` method draws a fan chart: the observed history, the median
 forecast, and nested 50%, 80%, 90% and 98% central intervals.
@@ -248,7 +260,7 @@ one-at-a-time forecasts.
 ```r
 fc_one <- timestral_forecast(m, mdeaths, h = 24)
 max(abs(fc_b$quantiles["male", 1, , ] - fc_one$quantiles[1, , ]))
-#> [1] 5.457e-12
+#> [1] 6.821e-12
 ```
 
 ## 4. Missing values and observation masks
@@ -472,7 +484,7 @@ holidays
 #>  8 New South Wales 1999 Q4 3121.
 #>  9 New South Wales 2000 Q1 3548.
 #> 10 New South Wales 2000 Q2 2840.
-#> # i 310 more rows
+#> # ℹ 310 more rows
 ```
 
 
@@ -495,7 +507,7 @@ as_tsibble(fc_ts) |> select(series, Quarter, q10, q50, q90)
 #>  8 New South Wales 2019 Q4 2988. 3350. 3719.
 #>  9 New South Wales 2020 Q1 3357. 3795. 4223.
 #> 10 New South Wales 2020 Q2 2931. 3336. 3755.
-#> # i 38 more rows
+#> # ℹ 38 more rows
 ```
 
 `as_tsibble()` keeps the input's index name and class (here
@@ -542,7 +554,7 @@ fbl
 #>  8 New South Wales 2019 Q4 quantile[21]
 #>  9 New South Wales 2020 Q1 quantile[21]
 #> 10 New South Wales 2020 Q2 quantile[21]
-#> # i 38 more rows
+#> # ℹ 38 more rows
 fbl |> filter(series == "Victoria") |> hilo(80) |> head(4)
 #> # A tsibble: 4 x 4 [1Q]
 #> # Key:       series [1]
@@ -614,7 +626,7 @@ fc_fbl |>
   group_by(.model) |>
   summarise(across(c(RMSE, MASE, CRPS), mean)) |>
   arrange(CRPS)
-#> # A tibble: 3 x 4
+#> # A tibble: 3 × 4
 #>   .model     RMSE  MASE  CRPS
 #>   <chr>     <dbl> <dbl> <dbl>
 #> 1 ETS        247.  1.51  151.
@@ -634,8 +646,43 @@ the weights:
 c(mable_MB   = length(serialize(fit, NULL)) / 1e6,
   weights_MB = file.size(file.path(m$dir, "model.safetensors")) / 1e6)
 #>   mable_MB weights_MB 
-#>      1.259    111.296
+#>      1.255    111.296
 ```
+
+### The forecast package
+
+The forecast package has its own `forecast()` generic, and calling it
+with a Timestral model returns a `"forecast"` object, so `accuracy()`,
+`autoplot()` and the rest of that package's tools work as for ETS or
+ARIMA. (`timestral_as_forecast()` converts a forecast you already
+have.) The intervals come straight from the quantile knots, which are
+not interpolated, so each level must pair two knots: the default is
+80% and 98%, because the 21 knots have no 2.5% and 97.5% quantiles for
+the usual 95%.
+
+
+```r
+ap_train <- window(AirPassengers, end = c(1957, 12))
+ap_test  <- window(AirPassengers, start = c(1958, 1))
+fo <- forecast::forecast(m, ap_train, h = 36)
+forecast::accuracy(fo, ap_test)
+#>                  ME  RMSE   MAE    MPE  MAPE   MASE ACF1 Theil's U
+#> Training set    NaN   NaN   NaN    NaN   NaN    NaN   NA        NA
+#> Test set     -6.498 17.24 14.54 -2.006 3.583 0.4755 0.49    0.3932
+```
+
+The training-set row is empty because a zero-shot model is not fitted
+to the context, so there are no in-sample fitted values.
+
+
+```r
+autoplot(fo) +
+  autolayer(ap_test, series = "held out") +
+  labs(title = "Timestral via forecast::forecast() (80% and 98% intervals)",
+       x = NULL, y = "Passengers (thousands)", colour = NULL)
+```
+
+![A Timestral forecast as a forecast-package object, with the held-out data.](figures/timestralR-forecast-pkg-plot-1.png)
 
 ## 8. Options, backends and parallel use
 
@@ -675,7 +722,7 @@ timing <- function(model) median(replicate(3, system.time(
   timestral_forecast(model, AirPassengers, h = 36))[["elapsed"]]))
 c(native = timing(m), R = timing(m_R))
 #> native      R 
-#>  0.233  0.474
+#>  0.058  0.090
 ```
 
 ### Parallel use
@@ -701,43 +748,46 @@ fcs <- mclapply(series, function(y) {
 
 ```r
 sessionInfo()
-#> R version 4.3.3 (2024-02-29)
-#> Platform: x86_64-pc-linux-gnu (64-bit)
-#> Running under: Ubuntu 24.04.5 LTS
+#> R version 4.6.1 (2026-06-24)
+#> Platform: x86_64-redhat-linux-gnu
+#> Running under: Fedora Linux 44 (Workstation Edition)
 #> 
 #> Matrix products: default
-#> BLAS:   /usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0 
-#> LAPACK: /usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3.12.0
+#> BLAS/LAPACK: FlexiBLAS OPENBLAS-OPENMP;  LAPACK version 3.12.1
 #> 
 #> locale:
-#> [1] C
+#>  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       
+#>  [4] LC_COLLATE=C.UTF-8     LC_MONETARY=C.UTF-8    LC_MESSAGES=C.UTF-8   
+#>  [7] LC_PAPER=C.UTF-8       LC_NAME=C              LC_ADDRESS=C          
+#> [10] LC_TELEPHONE=C         LC_MEASUREMENT=C.UTF-8 LC_IDENTIFICATION=C   
 #> 
-#> time zone: Etc/UTC
+#> time zone: Africa/Johannesburg
 #> tzcode source: system (glibc)
 #> 
 #> attached base packages:
 #> [1] stats     graphics  grDevices utils     datasets  methods   base     
 #> 
 #> other attached packages:
-#> [1] ggtime_1.1.0     fable_0.5.0      fabletools_0.8.0 dplyr_1.1.4     
-#> [5] tsibble_1.2.0    zoo_1.8-12       patchwork_1.3.2  ggplot2_4.0.3   
+#> [1] ggtime_1.1.0     fable_0.5.0      fabletools_0.8.0 dplyr_1.2.1     
+#> [5] tsibble_1.2.0    zoo_1.9-0        patchwork_1.3.2  ggplot2_4.0.3   
 #> [9] timestralR_0.5.0
 #> 
 #> loaded via a namespace (and not attached):
-#>  [1] gtable_0.3.6         jsonlite_1.8.8       compiler_4.3.3      
-#>  [4] highr_0.10           vecvec_1.4.0         tidyselect_1.2.0    
-#>  [7] Rcpp_1.1.2           dichromat_2.0-0.1    tidyr_1.3.1         
-#> [10] scales_1.4.0         ggdist_3.3.3         lattice_0.22-5      
-#> [13] R6_2.5.1             labeling_0.4.3       generics_0.1.3      
-#> [16] distributional_0.9.0 knitr_1.45           tibble_3.2.1        
-#> [19] mixtime_0.4.0        lubridate_1.9.3      tzdb_0.5.0          
-#> [22] pillar_1.9.0         RColorBrewer_1.1-3   rlang_1.1.3         
-#> [25] utf8_1.2.4           urca_1.3-3           xfun_0.41           
-#> [28] S7_0.2.2             timechange_0.3.0     cli_3.6.2           
-#> [31] progressr_0.14.0     withr_2.5.0          magrittr_2.0.3      
-#> [34] digest_0.6.34        grid_4.3.3           nlme_3.1-164        
-#> [37] lifecycle_1.0.4      anytime_0.3.13       vctrs_0.6.5         
-#> [40] evaluate_0.23        glue_1.7.0           farver_2.1.1        
-#> [43] feasts_0.5.0         fansi_1.0.5          purrr_1.0.2         
-#> [46] tools_4.3.3          pkgconfig_2.0.3
+#>  [1] ggdist_3.3.3         utf8_1.2.6           generics_0.1.4      
+#>  [4] tidyr_1.3.2          anytime_0.3.13       lattice_0.22-9      
+#>  [7] digest_0.6.39        magrittr_2.0.5       evaluate_1.0.5      
+#> [10] grid_4.6.1           timechange_0.4.0     RColorBrewer_1.1-3  
+#> [13] mixtime_0.4.0        jsonlite_2.0.0       feasts_0.5.0        
+#> [16] forecast_9.0.2       purrr_1.2.2          scales_1.4.0        
+#> [19] cli_3.6.6            rlang_1.3.0          vecvec_1.4.0        
+#> [22] withr_3.0.3          otel_0.2.0           tools_4.6.1         
+#> [25] parallel_4.6.1       tzdb_0.5.0           colorspace_2.1-4    
+#> [28] vctrs_0.7.3          R6_2.6.1             lifecycle_1.0.5     
+#> [31] lubridate_1.9.5      pkgconfig_2.0.3      urca_1.3-4          
+#> [34] progressr_1.1.0      pillar_1.11.1        gtable_0.3.6        
+#> [37] glue_1.8.1           Rcpp_1.1.2           xfun_0.60           
+#> [40] tibble_3.3.1         tidyselect_1.2.1     knitr_1.51          
+#> [43] farver_2.1.2         nlme_3.1-169         labeling_0.4.3      
+#> [46] timeDate_4052.112    fracdiff_1.5-4       compiler_4.6.1      
+#> [49] S7_0.2.2             distributional_0.9.0
 ```
