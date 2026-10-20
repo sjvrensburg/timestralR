@@ -23,8 +23,39 @@
     stop("unknown config keys: ", paste(sort(unknown), collapse = ", "))
   for (nm in names(.config_defaults))
     if (is.null(cfg[[nm]])) cfg[[nm]] <- .config_defaults[[nm]]
+  for (nm in c("patch_size", "d_model", "num_heads", "mlp_hidden_dim",
+               "block_schedule", "quantile_knots", "block_size",
+               "context_length")) {
+    if (is.null(cfg[[nm]]))
+      stop("config is missing required field '", nm, "'")
+  }
+  for (nm in c("patch_size", "d_model", "num_heads", "mlp_hidden_dim",
+               "block_size", "context_length")) {
+    v <- cfg[[nm]]
+    if (length(v) != 1L || !is.numeric(v) || !is.finite(v) ||
+        v != floor(v) || v < 1)
+      stop("config field '", nm, "' must be a positive integer, got ",
+           paste(format(v), collapse = ", "))
+    cfg[[nm]] <- as.integer(v)
+  }
   cfg$quantile_knots <- as.numeric(cfg$quantile_knots)
+  if (length(cfg$quantile_knots) == 0L || any(!is.finite(cfg$quantile_knots)) ||
+      any(cfg$quantile_knots <= 0 | cfg$quantile_knots >= 1))
+    stop("config field 'quantile_knots' must hold finite values in (0, 1)")
   cfg$block_schedule <- as.character(cfg$block_schedule)
+  if (length(cfg$block_schedule) == 0L)
+    stop("config field 'block_schedule' must name at least one layer")
+  for (nm in c("rope_theta", "norm_eps", "minimum_scale",
+               "quantile_width_factor", "rope_partial_factor")) {
+    v <- cfg[[nm]]
+    if (length(v) != 1L || !is.numeric(v) || !is.finite(v))
+      stop("config field '", nm, "' must be a single finite number")
+  }
+  if (cfg$rope_theta <= 0) stop("config field 'rope_theta' must be > 0")
+  if (cfg$norm_eps <= 0) stop("config field 'norm_eps' must be > 0")
+  if (cfg$minimum_scale < 0) stop("config field 'minimum_scale' must be >= 0")
+  if (cfg$quantile_width_factor < 0)
+    stop("config field 'quantile_width_factor' must be >= 0")
   if (cfg$d_model %% cfg$num_heads != 0)
     stop("d_model=", cfg$d_model, " not divisible by num_heads=", cfg$num_heads)
   hd <- cfg$d_model %/% cfg$num_heads

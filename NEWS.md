@@ -1,5 +1,17 @@
 # timestralR 0.5.0
 
+- Input validation hardening: `timestral_forecast()` now errors (instead
+  of aborting the R session, hanging, or silently coercing) on empty or
+  zero-dimension `y`, on a series with no finite observed values, on
+  non-numeric `y` or covariates (character, factor, complex, `Date`, ...),
+  and on a horizon that is not a single whole number in [1, 10000]. The
+  native `.ts_load()` re-validates the checkpoint config (positive
+  `patch_size`/`num_heads`/`block_size`, `d_model` divisible by
+  `num_heads`, valid `rope_dim`, increasing quantile knots containing
+  0.5), and `.ts_predict_block()` validates its dimensions, masks and
+  id arguments. Parallel checkpoint downloads no longer collide: each
+  download writes to a unique `.part` file and a lost rename race against
+  an identical published file is accepted.
 - tidyverts support (all via Suggests, no new hard dependencies):
   `tsibble` input to `timestral_forecast()` (keys become the batch,
   measured variables the jointly forecast variates; tsibble covariates

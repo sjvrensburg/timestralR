@@ -81,6 +81,15 @@ timestral_levels <- function() {
 .sha256_file <- function(path)
   digest::digest(file = path, algo = "sha256", serialize = FALSE)
 
+## Unique in-progress download file for `dest`, in the same directory so
+## the final rename stays on one filesystem. The old fixed
+## `paste0(dest, ".part")` name made parallel downloads (the usual
+## bootstrap/parLapply pattern) clobber each other's partial files.
+.download_tmp <- function(dest) {
+  tempfile(pattern = paste0(basename(dest), "-"), tmpdir = dirname(dest),
+           fileext = ".part")
+}
+
 #' Download a Timestral checkpoint
 #'
 #' Downloads `config.json` and `model.safetensors` from the official
@@ -125,7 +134,7 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
                      size, revision, f)
       old <- options(timeout = max(600, getOption("timeout")))
       on.exit(options(old), add = TRUE)
-      tmp <- paste0(dest, ".part")
+      tmp <- .download_tmp(dest)
       unlink(tmp)
       token <- Sys.getenv("HF_TOKEN", "")
       headers <- if (nzchar(token)) c(Authorization = paste("Bearer", token)) else NULL
@@ -142,8 +151,15 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
         stop("downloaded checkpoint file fails SHA-256 verification: ", url)
       }
       if (!file.rename(tmp, dest)) {
-        unlink(tmp)
-        stop("download failed: ", url)
+        ## Another process may have won the race and published dest
+        ## while we downloaded; accept it if it is the file we wanted.
+        if (file.exists(dest) &&
+            (is.null(expected) || identical(.sha256_file(dest), expected))) {
+          unlink(tmp)
+        } else {
+          unlink(tmp)
+          stop("download failed: ", url)
+        }
       }
     }
   }

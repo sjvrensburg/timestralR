@@ -59,6 +59,8 @@
 .as_tsibble_batch <- function(y, allow_logical = FALSE) {
   gr <- .tsibble_groups(y, allow_logical)
   mats <- gr$groups
+  if (length(mats) == 0L || nrow(mats[[1]]) == 0L)
+    stop("y must have at least one time step (got a tsibble with no rows)")
   arr <- array(0, c(nrow(mats[[1]]), length(gr$meas), length(mats)))
   for (b in seq_along(mats)) arr[, , b] <- mats[[b]]
   list(arr = aperm(arr, c(3, 2, 1)), vnames = gr$meas, tsp = NULL,
@@ -67,7 +69,7 @@
 }
 
 .batch_dispatch <- function(y, allow_logical = FALSE) {
-  if (inherits(y, "tbl_ts")) .as_tsibble_batch(y, allow_logical) else .as_batch(y)
+  if (inherits(y, "tbl_ts")) .as_tsibble_batch(y, allow_logical) else .as_batch(y, allow_logical)
 }
 
 ## Future time index in tidyverts form. For ts input this matches the

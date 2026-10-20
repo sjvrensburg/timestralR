@@ -5,6 +5,8 @@
 #include "scaler.h"
 #include "transformer.h"
 
+#include <stdexcept>
+
 namespace timestral {
 
 namespace {
@@ -37,6 +39,10 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
                                            const std::vector<int>& groups) {
   const int ps = s.cfg.patch_size;
   int R = inputs.rows(), T = inputs.cols(), ll = T / ps, h = horizon_patches;
+  if (ps < 1 || R < 1 || T < ps || T % ps != 0 || h < 1)
+    throw std::invalid_argument(
+        "predict_context_only needs R >= 1, T a positive multiple of "
+        "patch_size, and horizon_patches >= 1");
   ScaleOut sc = model_scale(s, inputs, observed);
   MaskMat obp = obs_per_patch(observed, ps);
   MaskMat kv = enc_key_validity(obp, s.cfg.attend_missing);
@@ -102,6 +108,12 @@ std::vector<MatrixXd> predict_window(const Session& s, const MatrixXd& full_inpu
   const int ps = s.cfg.patch_size;
   int R = full_inputs.rows(), W = full_observed.cols();
   int h = horizon_patches, n = W / ps, ll = n - h;
+  if (ps < 1 || R < 1 || W < ps || W % ps != 0 || h < 1 || ll < 1 ||
+      (int)role_ids.size() != R)
+    throw std::invalid_argument(
+        "predict_window needs R >= 1, a window that is a positive "
+        "multiple of patch_size with at least one context patch, "
+        "horizon_patches >= 1, and one role per row");
   ScaleOut sc = model_scale(s, full_inputs, full_observed);
   known_cov_scaling(s, full_inputs, full_observed, role_ids, sc);
   auto x_enc = patch_embed(s, sc.scaled, full_observed);
