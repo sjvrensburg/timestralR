@@ -1,10 +1,12 @@
-# Weekly real-checkpoint run: exercises timestral_load/timestral_forecast
-# on the actual 5M weights (the fixture tests in R-CMD-check cannot).
-# The download is hash-verified by timestral_download() at the pinned
-# upstream commit.
+# Real-checkpoint runs: exercise timestral_load/timestral_forecast on the
+# actual weights (the fixture tests in R-CMD-check cannot). Downloads are
+# hash-verified by timestral_download() at the pinned upstream commits.
+# 5M and 28M run weekly; the large 123M and 209M checkpoints run monthly
+# and on manual dispatch only, to bound download and runner time.
 on:
   schedule:
     - cron: '17 3 * * 1'
+    - cron: '17 4 1 * *'
   workflow_dispatch:
 
 name: full-checkpoint.yaml
@@ -13,37 +15,85 @@ permissions: read-all
 
 jobs:
   full-checkpoint:
+    if: github.event_name != 'schedule' || github.schedule == '17 3 * * 1'
     runs-on: ubuntu-latest
 
-    name: ubuntu-latest (5M checkpoint)
+    name: ubuntu-latest (${{ matrix.size }} checkpoint)
+
+    strategy:
+      fail-fast: false
+      matrix:
+        size: ['5M', '28M']
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           needs: check
 
       - name: Install the package
         run: R CMD INSTALL .
 
-      - name: Cache the 5M checkpoint
-        uses: actions/cache@v4
+      - name: Cache the ${{ matrix.size }} checkpoint
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/R/timestralR
-          key: timestral-5m-pinned-v1
+          key: timestral-${{ matrix.size }}-pinned-v1
 
-      - name: Run the full test suite against the real 5M checkpoint
+      - name: Run the full test suite against the real ${{ matrix.size }} checkpoint
         run: |
-          MODEL_DIR="$(Rscript -e 'cat(timestralR::timestral_download("5M"))')"
+          MODEL_DIR="$(Rscript -e 'cat(timestralR::timestral_download("${{ matrix.size }}"))')"
+          echo "checkpoint: $MODEL_DIR"
+          TIMESTRALR_TEST_MODEL_DIR="$MODEL_DIR" Rscript tests/timestralR-tests.R
+        shell: bash
+
+  full-checkpoint-large:
+    if: github.event_name == 'workflow_dispatch' || github.schedule == '17 4 1 * *'
+    runs-on: ubuntu-latest
+
+    name: ubuntu-latest (${{ matrix.size }} checkpoint)
+
+    strategy:
+      fail-fast: false
+      matrix:
+        size: ['123M', '209M']
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          needs: check
+
+      - name: Install the package
+        run: R CMD INSTALL .
+
+      - name: Cache the ${{ matrix.size }} checkpoint
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/R/timestralR
+          key: timestral-${{ matrix.size }}-pinned-v1
+
+      - name: Run the full test suite against the real ${{ matrix.size }} checkpoint
+        run: |
+          MODEL_DIR="$(Rscript -e 'cat(timestralR::timestral_download("${{ matrix.size }}"))')"
           echo "checkpoint: $MODEL_DIR"
           TIMESTRALR_TEST_MODEL_DIR="$MODEL_DIR" Rscript tests/timestralR-tests.R
         shell: bash

@@ -18,7 +18,7 @@ remotes::install_github("sjvrensburg/timestralR")
 ```
 
 Requires R (>= 4.1) with a C++17 compiler; the hard R dependencies are
-`jsonlite` and `Rcpp`/`RcppEigen`, plus the base packages `utils`,
+`jsonlite`, `digest` and `Rcpp`/`RcppEigen`, plus the base packages `utils`,
 `tools` and `stats`. `zoo`, `xts`, `tsibble`, `ggplot2`,
 `fabletools`, `fable` and `distributional` are optional and only needed
 for the matching interfaces. Model weights are downloaded once per user
