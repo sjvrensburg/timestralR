@@ -22,8 +22,9 @@ harness and golden fixtures.
   known_future, known_future_mask, groups)` returns `(R, horizon_steps, Q)`
   raw-space quantiles for one decode block. Everything above it
   (assembly, refinement, capping, mirroring, clipping) stays in R.
-- Golden fixtures in `tests/fixtures/` (tiny random checkpoint + official
-  outputs) pin this contract without Python or downloads.
+- Golden fixtures in `tests/fixtures/` (official outputs for the tiny
+  random checkpoint, which is installed from `inst/extdata/tiny/` so the
+  examples can use it) pin this contract without Python or downloads.
 
 ## Native backend (implemented)
 

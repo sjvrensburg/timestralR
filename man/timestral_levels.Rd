@@ -2,7 +2,7 @@
 % Please edit documentation in R/safetensors.R
 \name{timestral_levels}
 \alias{timestral_levels}
-\title{Quantile levels returned by every Timestral forecast}
+\title{Quantile levels of the official Timestral checkpoints}
 \usage{
 timestral_levels()
 }
@@ -10,7 +10,9 @@ timestral_levels()
 Numeric vector of 21 levels from 0.01 to 0.99.
 }
 \description{
-Quantile levels returned by every Timestral forecast
+The levels every official checkpoint forecasts. A forecast always
+carries the levels of the checkpoint that made it in \code{fc$levels},
+which can differ for other (for example fine-tuned) checkpoints.
 }
 \examples{
 timestral_levels()

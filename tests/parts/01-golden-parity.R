@@ -1,13 +1,17 @@
 ## Golden fixtures, backend agreement, multi-block decode, parity fuzz.
 ## Sourced by tests/timestralR-tests.R; expects the package loaded.
-## Defines the shared fixture model `m`/`m_R`, inputs `y`/`y2`, forecast `fc`.
+## Defines the checkpoint path `tiny`, the shared fixture model `m`/`m_R`,
+## inputs `y`/`y2` and forecast `fc`.
 stopifnot(identical(length(timestral_levels()), 21L))
 stopifnot(identical(timestral_levels()[11], 0.5))
 
 fx <- file.path("fixtures")
 if (!dir.exists(fx)) fx <- file.path("tests", "fixtures")
 stopifnot(dir.exists(fx))
-m <- timestral_load(file.path(fx, "tiny"), max_context = 4096L)
+## the tiny random-weight checkpoint ships with the package (inst/extdata)
+tiny <- system.file("extdata", "tiny", package = "timestralR")
+stopifnot(nzchar(tiny))
+m <- timestral_load(tiny, max_context = 4096L)
 
 ## golden: univariate
 y <- scan(file.path(fx, "input_univariate.csv"), sep = ",", quiet = TRUE)
@@ -27,7 +31,7 @@ gold2 <- as.matrix(read.csv(file.path(fx, "golden_covariates.csv"), header = FAL
 stopifnot(max(abs(fc2$quantiles[1, , ] - gold2)) < 1e-5)
 
 ## native and R backends agree on the fixtures
-m_R <- timestral_load(file.path(fx, "tiny"), max_context = 4096L, backend = "R")
+m_R <- timestral_load(tiny, max_context = 4096L, backend = "R")
 fc_R <- timestral_forecast(m_R, y, h = 24)
 stopifnot(max(abs(fc_R$quantiles - fc$quantiles)) < 1e-10)
 fc2_R <- timestral_forecast(m_R, y2, h = 24, past_covariates = matrix(pa, ncol = 1),
@@ -36,16 +40,16 @@ stopifnot(max(abs(fc2_R$quantiles - fc2$quantiles)) < 1e-10)
 
 ## multi-block decode (native K/V cache across blocks) agrees with R;
 ## the second variant truncates the context mid-decode, forcing cache misses
-m_mb <- timestral_load(file.path(fx, "tiny"), max_context = 4096L,
+m_mb <- timestral_load(tiny, max_context = 4096L,
                        per_shot_horizon_patches = 1L)
-m_mb_R <- timestral_load(file.path(fx, "tiny"), max_context = 4096L,
+m_mb_R <- timestral_load(tiny, max_context = 4096L,
                          per_shot_horizon_patches = 1L, backend = "R")
 fc_mb <- timestral_forecast(m_mb, y, h = 48)
 fc_mb_R <- timestral_forecast(m_mb_R, y, h = 48)
 stopifnot(max(abs(fc_mb_R$quantiles - fc_mb$quantiles)) < 1e-10)
-m_tr <- timestral_load(file.path(fx, "tiny"), max_context = 32L,
+m_tr <- timestral_load(tiny, max_context = 32L,
                        per_shot_horizon_patches = 1L)
-m_tr_R <- timestral_load(file.path(fx, "tiny"), max_context = 32L,
+m_tr_R <- timestral_load(tiny, max_context = 32L,
                          per_shot_horizon_patches = 1L, backend = "R")
 fc_tr <- timestral_forecast(m_tr, y, h = 48)
 fc_tr_R <- timestral_forecast(m_tr_R, y, h = 48)
@@ -71,7 +75,7 @@ fp <- matrix(rnorm(96), ncol = 1); fk <- matrix(rnorm(120), ncol = 1)
        timestral_forecast(m_R, fz[1:96], h = 24,
                           past_covariates = fp, known_covariates = fk))
 fl <- cumsum(rnorm(300))
-m_s <- timestral_load(file.path(fx, "tiny"), max_context = 64L)
-m_sR <- timestral_load(file.path(fx, "tiny"), max_context = 64L, backend = "R")
+m_s <- timestral_load(tiny, max_context = 64L)
+m_sR <- timestral_load(tiny, max_context = 64L, backend = "R")
 .agree(timestral_forecast(m_s, fl, h = 40),
        timestral_forecast(m_sR, fl, h = 40))

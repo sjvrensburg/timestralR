@@ -1,6 +1,7 @@
 # Dev-only fixture generator (needs torch + official timestral; end users
 # never run this). Creates:
-#   tests/fixtures/tiny/           a tiny random-weight checkpoint
+#   inst/extdata/tiny/             a tiny random-weight checkpoint (installed,
+#                                  used by the examples and tests)
 #   tests/fixtures/golden_*.csv    official-PyTorch outputs for that checkpoint
 #   /tmp/timestral-synth-<name>/   config-variant checkpoints for step-2 checks
 import json
@@ -37,7 +38,7 @@ def make_ckpt(dirpath, seed, **overrides):
 
 
 def main():
-    tiny = make_ckpt(ROOT / "tests" / "fixtures" / "tiny", seed=123)
+    tiny = make_ckpt(ROOT / "inst" / "extdata" / "tiny", seed=123)
     f = TimestralForecaster.from_pretrained(tiny, max_context=4096)
     rng = np.random.default_rng(7)
     t = np.arange(96)

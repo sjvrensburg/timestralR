@@ -33,11 +33,12 @@ fabletools package (and fable for the usual workflow); forecasts are
 reported as 21-quantile distributions.
 }
 \examples{
-\dontrun{
-library(fable)
-m <- timestral_load("5M")
-fit <- as_tsibble(AirPassengers) |>
-  model(timestral = TIMESTRAL(value, model = m))
-fit |> forecast(h = 24)
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
+if (requireNamespace("fable", quietly = TRUE)) {
+  fit <- tsibble::as_tsibble(AirPassengers) |>
+    fabletools::model(timestral = TIMESTRAL(value, model = m))
+  fit |> fabletools::forecast(h = 24)
 }
 }

@@ -2,8 +2,11 @@ Package: timestralR
 Type: Package
 Title: Zero-Shot Probabilistic Forecasting with Timestral
 Version: 0.5.0
-Authors@R: person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
-    email = "sjansevanrensburg@gmail.com")
+Authors@R: c(
+    person("Stefan", "Janse van Rensburg", role = c("aut", "cre"),
+           email = "sjansevanrensburg@gmail.com"),
+    person("Mistral AI", role = "cph",
+           comment = "authors of the 'timestral' Python package ported in R/ and src/"))
 URL: https://github.com/sjvrensburg/timestralR
 BugReports: https://github.com/sjvrensburg/timestralR/issues
 Description: Runs Mistral AI's Timestral time-series foundation models from R
@@ -11,7 +14,7 @@ Description: Runs Mistral AI's Timestral time-series foundation models from R
     downloaded once from the Mistral AI Hugging Face repositories; the
     transformer forward pass and the forecasting loop are implemented
     natively in R on top of R's BLAS.
-License: Apache License (>= 2)
+License: Apache License (== 2.0)
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
 Imports: jsonlite, digest, utils, tools, stats, Rcpp (>= 1.0.0)

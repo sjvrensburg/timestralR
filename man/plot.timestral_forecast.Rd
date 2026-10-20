@@ -38,9 +38,9 @@ predictive interval bands (widest lightest) per variate. Uses the
 stored time index when the forecast input carried one.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 plot(fc)
-}
 }

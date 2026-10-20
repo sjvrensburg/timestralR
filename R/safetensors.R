@@ -44,7 +44,11 @@
   .validate_config(jsonlite::fromJSON(path))
 }
 
-#' Quantile levels returned by every Timestral forecast
+#' Quantile levels of the official Timestral checkpoints
+#'
+#' The levels every official checkpoint forecasts. A forecast always
+#' carries the levels of the checkpoint that made it in `fc$levels`,
+#' which can differ for other (for example fine-tuned) checkpoints.
 #'
 #' @return Numeric vector of 21 levels from 0.01 to 0.99.
 #' @examples
@@ -90,33 +94,151 @@ timestral_levels <- function() {
            fileext = ".part")
 }
 
+## Hub repository IDs are "owner/name"; the official checkpoints are
+## mistralai/Timestral-<size> and keep their pins when named either way.
+.is_repo_id <- function(x) {
+  grepl("^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$", x)
+}
+
+.official_size <- function(repo) {
+  i <- match(tolower(repo), tolower(paste0("mistralai/Timestral-", .sizes)))
+  if (is.na(i)) NULL else .sizes[i]
+}
+
+.is_commit <- function(x) grepl("^[0-9a-f]{40}$", x)
+
+.hub_headers <- function(token) {
+  if (nzchar(token)) c(Authorization = paste("Bearer", token)) else NULL
+}
+
+## Branch and tag names move, so a non-commit revision is resolved to its
+## commit on the Hub (and recorded under refs/ for offline reuse) rather
+## than cached under its name, where it would go stale.
+.resolve_revision <- function(repo, revision, repo_dir, token,
+                              local_files_only) {
+  if (.is_commit(revision)) return(revision)
+  ref <- file.path(repo_dir, "refs", utils::URLencode(revision, reserved = TRUE))
+  if (!local_files_only) {
+    url <- sprintf("https://huggingface.co/api/models/%s/revision/%s", repo,
+                   utils::URLencode(revision, reserved = TRUE))
+    tmp <- tempfile(fileext = ".json")
+    on.exit(unlink(tmp), add = TRUE)
+    status <- tryCatch(
+      suppressWarnings(utils::download.file(url, tmp, quiet = TRUE,
+                                            headers = .hub_headers(token))),
+      error = function(e) 1L)
+    sha <- if (status == 0 && file.exists(tmp))
+      tryCatch(jsonlite::fromJSON(tmp)$sha, error = function(e) NULL)
+    if (!is.character(sha) || length(sha) != 1L || !.is_commit(sha))
+      stop("could not resolve revision '", revision, "' of '", repo,
+           "' on the Hugging Face Hub; check the repository ID and the ",
+           "revision, and set `token` (or HF_TOKEN) for private or gated ",
+           "repositories")
+    dir.create(dirname(ref), recursive = TRUE, showWarnings = FALSE)
+    tmp_ref <- .download_tmp(ref)
+    writeLines(sha, tmp_ref)
+    if (!file.rename(tmp_ref, ref)) unlink(tmp_ref)
+    return(sha)
+  }
+  sha <- if (file.exists(ref)) readLines(ref, n = 1L, warn = FALSE)
+  if (length(sha) != 1L || !.is_commit(sha))
+    stop("revision '", revision, "' of '", repo, "' is not in the cache ",
+         "and local_files_only = TRUE; pass a commit hash or download once ",
+         "online")
+  sha
+}
+
+## Download `url` to `dest` through a unique .part file, verifying the
+## SHA-256 when `expected` is given.
+.hub_fetch <- function(url, dest, expected, token) {
+  old <- options(timeout = max(600, getOption("timeout")))
+  on.exit(options(old), add = TRUE)
+  tmp <- .download_tmp(dest)
+  unlink(tmp)
+  status <- tryCatch(
+    utils::download.file(url, tmp, mode = "wb", quiet = TRUE,
+                         headers = .hub_headers(token)),
+    error = function(e) { unlink(tmp); stop(e) })
+  if (status != 0 || !file.exists(tmp)) {
+    unlink(tmp)
+    stop("download failed: ", url)
+  }
+  if (!is.null(expected) && !identical(.sha256_file(tmp), expected)) {
+    unlink(tmp)
+    stop("downloaded checkpoint file fails SHA-256 verification: ", url)
+  }
+  if (!file.rename(tmp, dest)) {
+    ## Another process may have won the race and published dest
+    ## while we downloaded; accept it if it is the file we wanted.
+    if (file.exists(dest) &&
+        (is.null(expected) || identical(.sha256_file(dest), expected))) {
+      unlink(tmp)
+    } else {
+      unlink(tmp)
+      stop("download failed: ", url)
+    }
+  }
+  invisible(dest)
+}
+
 #' Download a Timestral checkpoint
 #'
-#' Downloads `config.json` and `model.safetensors` from the official
-#' Mistral AI Hugging Face repository (Modified MIT weights licence),
-#' cached per user. Set `HF_TOKEN` for authenticated downloads.
+#' Downloads `config.json` and `model.safetensors` from a Hugging Face
+#' Hub repository, cached per user. A size names the official Mistral AI
+#' repository (Modified MIT weights licence); any other `"owner/name"`
+#' repository holding a Timestral checkpoint in the same format (for
+#' example a fine-tuned model) can be given by its ID.
 #'
-#' @param size one of "5M", "28M", "123M", "209M"
-#' @param revision Hub revision (branch, tag or commit); default `NULL`
-#'   uses the pinned upstream commit for `size`, whose files are verified
-#'   against recorded SHA-256 hashes. Other revisions are not verified.
+#' @param model one of "5M", "28M", "123M", "209M", or a Hub repository
+#'   ID such as `"mistralai/Timestral-5M"`. The official repositories
+#'   are pinned whichever way they are named.
+#' @param revision Hub revision (branch, tag or commit). The default
+#'   `NULL` uses the pinned upstream commit for an official size, whose
+#'   files are verified against recorded SHA-256 hashes, and `"main"` for
+#'   any other repository. Branch and tag names are resolved to their
+#'   current commit on the Hub (the resolution is cached for offline use);
+#'   files at revisions other than the pinned ones are not hash-verified.
 #' @param cache_dir where to keep the files
 #' @param local_files_only only read from the cache, never download
+#' @param token Hugging Face access token for private or gated
+#'   repositories; defaults to the `HF_TOKEN` environment variable
 #' @return The checkpoint directory.
 #' @examples
 #' \dontrun{
 #' timestral_download("5M")
+#' timestral_download("mistralai/Timestral-5M")   # the same, pinned
 #' }
 #' @export
-timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
-                               revision = NULL,
+timestral_download <- function(model = "5M", revision = NULL,
                                cache_dir = tools::R_user_dir("timestralR", "cache"),
-                               local_files_only = FALSE) {
-  size <- match.arg(size)
-  pin <- .pinned_checkpoints[[size]]
-  if (is.null(revision)) revision <- pin$revision
-  pinned <- identical(revision, pin$revision)
-  dest_dir <- file.path(cache_dir, tolower(size), revision)
+                               local_files_only = FALSE,
+                               token = Sys.getenv("HF_TOKEN", "")) {
+  if (!is.character(model) || length(model) != 1L || is.na(model))
+    stop("'model' must be a single string")
+  size <- if (model %in% .sizes) model else if (.is_repo_id(model)) .official_size(model)
+  if (is.null(size) && !.is_repo_id(model))
+    stop("'model' must be one of ", paste(.sizes, collapse = ", "),
+         " or a Hugging Face repository ID (\"owner/name\")")
+  if (!is.null(revision) &&
+      (!is.character(revision) || length(revision) != 1L || is.na(revision) ||
+       !nzchar(revision) || revision %in% c(".", "..")))
+    stop("'revision' must be a branch, tag or commit name")
+  if (is.null(token) || is.na(token)) token <- ""
+  if (!is.null(size)) {
+    pin <- .pinned_checkpoints[[size]]
+    repo <- paste0("mistralai/Timestral-", size)
+    repo_dir <- file.path(cache_dir, tolower(size))
+    if (is.null(revision)) revision <- pin$revision
+  } else {
+    pin <- NULL
+    repo <- model
+    repo_dir <- file.path(cache_dir, "hub", sub("/", "--", model, fixed = TRUE))
+    if (is.null(revision)) revision <- "main"
+  }
+  revision <- .resolve_revision(repo, revision, repo_dir, token,
+                                local_files_only)
+  pinned <- !is.null(pin) && identical(revision, pin$revision)
+  dest_dir <- file.path(repo_dir, revision)
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   for (f in c("config.json", "model.safetensors")) {
     dest <- file.path(dest_dir, f)
@@ -130,37 +252,8 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
     if (!file.exists(dest)) {
       if (local_files_only)
         stop("checkpoint not in cache and local_files_only = TRUE: ", dest)
-      url <- sprintf("https://huggingface.co/mistralai/Timestral-%s/resolve/%s/%s",
-                     size, revision, f)
-      old <- options(timeout = max(600, getOption("timeout")))
-      on.exit(options(old), add = TRUE)
-      tmp <- .download_tmp(dest)
-      unlink(tmp)
-      token <- Sys.getenv("HF_TOKEN", "")
-      headers <- if (nzchar(token)) c(Authorization = paste("Bearer", token)) else NULL
-      status <- tryCatch(
-        utils::download.file(url, tmp, mode = "wb", quiet = TRUE,
-                             headers = headers),
-        error = function(e) { unlink(tmp); stop(e) })
-      if (status != 0 || !file.exists(tmp)) {
-        unlink(tmp)
-        stop("download failed: ", url)
-      }
-      if (!is.null(expected) && !identical(.sha256_file(tmp), expected)) {
-        unlink(tmp)
-        stop("downloaded checkpoint file fails SHA-256 verification: ", url)
-      }
-      if (!file.rename(tmp, dest)) {
-        ## Another process may have won the race and published dest
-        ## while we downloaded; accept it if it is the file we wanted.
-        if (file.exists(dest) &&
-            (is.null(expected) || identical(.sha256_file(dest), expected))) {
-          unlink(tmp)
-        } else {
-          unlink(tmp)
-          stop("download failed: ", url)
-        }
-      }
+      .hub_fetch(sprintf("https://huggingface.co/%s/resolve/%s/%s",
+                         repo, revision, f), dest, expected, token)
     }
   }
   dest_dir
@@ -168,10 +261,13 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 
 #' Load a Timestral model
 #'
-#' Load a Timestral model from the official Mistral AI checkpoint.
+#' Load a Timestral model from the official Mistral AI checkpoint, another
+#' Hugging Face Hub repository, or a local checkpoint directory.
 #'
-#' @param model a size ("5M", "28M", "123M", "209M") to download/cache, or
-#'   a local directory holding `config.json` and `model.safetensors`
+#' @param model a size ("5M", "28M", "123M", "209M") to download/cache, a
+#'   local directory holding `config.json` and `model.safetensors`, or a
+#'   Hugging Face repository ID (`"owner/name"`) to download/cache. A local
+#'   directory takes precedence over a repository ID of the same name.
 #' @param max_context context cap in steps; NULL (default) uses the trained
 #'   context length from the checkpoint, as in the Python package
 #' @param per_shot_horizon_patches patches decoded per block (capped at the
@@ -180,19 +276,28 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 #'   plus/minus this multiple of the last patch scale; 0 disables
 #' @param extreme_value_threshold fed-back medians at or above this magnitude
 #'   become 0
-#' @param revision Hub revision when `model` is a size; default `NULL`
-#'   uses the pinned, hash-verified upstream commit for the size
-#' @param cache_dir checkpoint cache directory when `model` is a size
+#' @param revision Hub revision when `model` is a size or repository ID;
+#'   see [timestral_download()]. The default `NULL` uses the pinned,
+#'   hash-verified upstream commit for an official size and `"main"`
+#'   otherwise.
+#' @param cache_dir checkpoint cache directory for downloaded checkpoints
 #' @param local_files_only only read from the cache, never download
+#' @param token Hugging Face access token for private or gated
+#'   repositories; defaults to the `HF_TOKEN` environment variable
 #' @param backend "native" (default) uses the compiled RcppEigen
 #'   implementation of the transformer block; "R" uses the pure-R reference
 #'   implementation. Results are identical up to floating-point order.
 #' @return A `timestral_model` object.
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## A tiny random-weight checkpoint ships with the package, so this runs
+#' ## offline; its forecasts are meaningless. Use a size such as "5M" or
+#' ## "28M" (downloaded once) for real forecasts.
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' plot(fc)
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' m <- timestral_load("mistralai/Timestral-28M")
 #' }
 #' @export
 timestral_load <- function(model = "5M", max_context = NULL,
@@ -202,17 +307,24 @@ timestral_load <- function(model = "5M", max_context = NULL,
                            revision = NULL,
                            cache_dir = tools::R_user_dir("timestralR", "cache"),
                            local_files_only = FALSE,
+                           token = Sys.getenv("HF_TOKEN", ""),
                            backend = c("native", "R")) {
   if (per_shot_horizon_patches < 1)
     stop("per_shot_horizon_patches must be >= 1, got ", per_shot_horizon_patches)
+  if (!is.character(model) || length(model) != 1L || is.na(model))
+    stop("'model' must be a single string")
   dir <- if (model %in% .sizes) {
     timestral_download(model, revision = revision, cache_dir = cache_dir,
-                       local_files_only = local_files_only)
+                       local_files_only = local_files_only, token = token)
   } else if (dir.exists(model)) {
     normalizePath(model)
+  } else if (.is_repo_id(model)) {
+    timestral_download(model, revision = revision, cache_dir = cache_dir,
+                       local_files_only = local_files_only, token = token)
   } else {
     stop("'model' must be one of ", paste(.sizes, collapse = ", "),
-         " or a directory with config.json and model.safetensors")
+         ", a directory with config.json and model.safetensors, or a ",
+         "Hugging Face repository ID (\"owner/name\")")
   }
   backend <- match.arg(backend)
   cfg <- .read_config(file.path(dir, "config.json"))

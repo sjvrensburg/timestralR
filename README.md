@@ -24,7 +24,7 @@ Requires R (>= 4.1) with a C++17 compiler; the hard R dependencies are
 for the matching interfaces. Model weights are downloaded once per user
 on first use (21 MB for 5M up to 837 MB for 209M, fp32) and cached.
 Weights are Mistral AI's, under their Modified MIT licence; package code
-is Apache 2.0.
+is Apache 2.0, ported from Mistral AI's Apache-2.0 `timestral` package.
 
 ## Use
 
@@ -33,11 +33,11 @@ The vignette walks through every feature with plots:
 
 ```r
 library(timestralR)
-m  <- timestral_load("28M")                  # or a local checkpoint directory
+m  <- timestral_load("28M")                  # or a local directory or Hub repo ID
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 plot(fc)                                     # fan chart: history + median + bands
 timestral_median(fc)                         # a ts, starting Jan 1961
-timestral_quantile(fc, 0.9)                  # any of timestral_levels()
+timestral_quantile(fc, 0.9)                  # any of fc$levels
 fc$quantiles                                 # array: variate x step x 21 levels
 head(as_forecast_df(fc))                     # tidy long format (with time column)
 ```

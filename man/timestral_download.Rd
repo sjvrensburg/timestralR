@@ -5,33 +5,45 @@
 \title{Download a Timestral checkpoint}
 \usage{
 timestral_download(
-  size = c("5M", "28M", "123M", "209M"),
+  model = "5M",
   revision = NULL,
   cache_dir = tools::R_user_dir("timestralR", "cache"),
-  local_files_only = FALSE
+  local_files_only = FALSE,
+  token = Sys.getenv("HF_TOKEN", "")
 )
 }
 \arguments{
-\item{size}{one of "5M", "28M", "123M", "209M"}
+\item{model}{one of "5M", "28M", "123M", "209M", or a Hub repository
+ID such as \code{"mistralai/Timestral-5M"}. The official repositories
+are pinned whichever way they are named.}
 
-\item{revision}{Hub revision (branch, tag or commit); default \code{NULL}
-uses the pinned upstream commit for \code{size}, whose files are verified
-against recorded SHA-256 hashes. Other revisions are not verified.}
+\item{revision}{Hub revision (branch, tag or commit). The default
+\code{NULL} uses the pinned upstream commit for an official size, whose
+files are verified against recorded SHA-256 hashes, and \code{"main"} for
+any other repository. Branch and tag names are resolved to their
+current commit on the Hub (the resolution is cached for offline use);
+files at revisions other than the pinned ones are not hash-verified.}
 
 \item{cache_dir}{where to keep the files}
 
 \item{local_files_only}{only read from the cache, never download}
+
+\item{token}{Hugging Face access token for private or gated
+repositories; defaults to the \code{HF_TOKEN} environment variable}
 }
 \value{
 The checkpoint directory.
 }
 \description{
-Downloads \code{config.json} and \code{model.safetensors} from the official
-Mistral AI Hugging Face repository (Modified MIT weights licence),
-cached per user. Set \code{HF_TOKEN} for authenticated downloads.
+Downloads \code{config.json} and \code{model.safetensors} from a Hugging Face
+Hub repository, cached per user. A size names the official Mistral AI
+repository (Modified MIT weights licence); any other \code{"owner/name"}
+repository holding a Timestral checkpoint in the same format (for
+example a fine-tuned model) can be given by its ID.
 }
 \examples{
 \dontrun{
 timestral_download("5M")
+timestral_download("mistralai/Timestral-5M")   # the same, pinned
 }
 }

@@ -77,11 +77,12 @@ utils::globalVariables(".data")
 #' @param ... ignored
 #' @return for `autoplot`, a `ggplot`; for `autolayer`, a list of layers
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
-#' ggplot2::autoplot(fc)
-#' }
+#' if (requireNamespace("ggplot2", quietly = TRUE))
+#'   ggplot2::autoplot(fc)
 #' @exportS3Method ggplot2::autoplot
 autoplot.timestral_forecast <- function(object, series = 1L,
                                         levels = c(0.5, 0.8, 0.9, 0.98),

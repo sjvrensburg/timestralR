@@ -13,12 +13,15 @@ timestral_load(
   revision = NULL,
   cache_dir = tools::R_user_dir("timestralR", "cache"),
   local_files_only = FALSE,
+  token = Sys.getenv("HF_TOKEN", ""),
   backend = c("native", "R")
 )
 }
 \arguments{
-\item{model}{a size ("5M", "28M", "123M", "209M") to download/cache, or
-a local directory holding \code{config.json} and \code{model.safetensors}}
+\item{model}{a size ("5M", "28M", "123M", "209M") to download/cache, a
+local directory holding \code{config.json} and \code{model.safetensors}, or a
+Hugging Face repository ID (\code{"owner/name"}) to download/cache. A local
+directory takes precedence over a repository ID of the same name.}
 
 \item{max_context}{context cap in steps; NULL (default) uses the trained
 context length from the checkpoint, as in the Python package}
@@ -32,12 +35,17 @@ plus/minus this multiple of the last patch scale; 0 disables}
 \item{extreme_value_threshold}{fed-back medians at or above this magnitude
 become 0}
 
-\item{revision}{Hub revision when \code{model} is a size; default \code{NULL}
-uses the pinned, hash-verified upstream commit for the size}
+\item{revision}{Hub revision when \code{model} is a size or repository ID;
+see \code{\link[=timestral_download]{timestral_download()}}. The default \code{NULL} uses the pinned,
+hash-verified upstream commit for an official size and \code{"main"}
+otherwise.}
 
-\item{cache_dir}{checkpoint cache directory when \code{model} is a size}
+\item{cache_dir}{checkpoint cache directory for downloaded checkpoints}
 
 \item{local_files_only}{only read from the cache, never download}
+
+\item{token}{Hugging Face access token for private or gated
+repositories; defaults to the \code{HF_TOKEN} environment variable}
 
 \item{backend}{"native" (default) uses the compiled RcppEigen
 implementation of the transformer block; "R" uses the pure-R reference
@@ -47,12 +55,18 @@ implementation. Results are identical up to floating-point order.}
 A \code{timestral_model} object.
 }
 \description{
-Load a Timestral model from the official Mistral AI checkpoint.
+Load a Timestral model from the official Mistral AI checkpoint, another
+Hugging Face Hub repository, or a local checkpoint directory.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## A tiny random-weight checkpoint ships with the package, so this runs
+## offline; its forecasts are meaningless. Use a size such as "5M" or
+## "28M" (downloaded once) for real forecasts.
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 plot(fc)
+\dontrun{
+m <- timestral_load("5M")
+m <- timestral_load("mistralai/Timestral-28M")
 }
 }

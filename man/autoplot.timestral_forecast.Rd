@@ -33,9 +33,10 @@ add any fill scale, such as \code{ggplot2::scale_fill_brewer()}, to change
 them.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
-ggplot2::autoplot(fc)
-}
+if (requireNamespace("ggplot2", quietly = TRUE))
+  ggplot2::autoplot(fc)
 }
