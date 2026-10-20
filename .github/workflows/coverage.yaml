@@ -1,0 +1,50 @@
+# Test coverage (R and native sources) via covr, uploaded to Codecov.
+# fail_ci_if_error is false so coverage never breaks the build; the
+# printed covr summary in the run log is the fallback record if the
+# Codecov upload is unavailable.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+name: coverage.yaml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    name: ubuntu-latest (coverage)
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          extra-packages: any::covr, any::xml2
+          needs: check
+
+      - name: Compute coverage
+        run: |
+          cov <- covr::package_coverage(path = ".", type = "tests", quiet = TRUE)
+          print(cov)
+          covr::to_cobertura(cov, "coverage.xml")
+        shell: Rscript {0}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        with:
+          files: coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
