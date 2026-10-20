@@ -11,6 +11,34 @@
   `fabletools::as_fable()` method converting forecasts to `fbl_ts`.
   S3 methods for these generics are registered conditionally when the
   owning package is loaded.
+- Fixes to the tidyverts interfaces: `as_tsibble()`/`as_fable()` keep
+  the index column for `ts`, `zoo` and `xts` forecasts (named `index`,
+  and for `ts` with the `yearmonth`/`yearquarter`/... class that
+  `tsibble::as_tsibble()` uses) and for tsibble indexes named `time` or
+  `step`; multivariate forecasts convert to a fable with a `variate` key;
+  quantile distributions are built in a way that works across
+  distributional versions. Fitted `TIMESTRAL()` models store a handle to
+  the checkpoint instead of the weights, so mables stay small when saved
+  and forecast in new sessions or parallel workers. Tsibble inputs are
+  put in index order and implicit gaps are filled with missing values;
+  logical tsibbles work as observation masks; keyed tsibble covariates
+  are matched to series by key and validated like other covariates. Plots
+  label variates by name.
+- Documentation and `NAMESPACE` are generated with roxygen2; methods for
+  ggplot2, tsibble and fabletools generics are registered through
+  delayed `S3method()` entries instead of `.onLoad` hooks. DESCRIPTION
+  now states `Depends: R (>= 4.0.0)` (needed for `tools::R_user_dir()`).
+- The native backend is split from one file into per-unit headers and
+  implementation files (`session`, `nn_ops`, `scaler`, `masks`,
+  `attention`, `transformer`, `head`, `predict`, plus the Rcpp entry
+  points); outputs are bit-for-bit unchanged.
+- New vignette, `vignette("timestralR")`, covering every feature with
+  plots (precomputed from `vignettes/timestralR.Rmd.orig`; rebuild with
+  `vignettes/precompile.R`).
+- `autoplot()`/`autolayer()` draw opaque bands in graded blues, widest
+  first, matching `plot()` (any fill scale still overrides them), and
+  facet variates in input order. A list of series that share a time
+  index keeps it, and a named list no longer leaks a name into `dim()`.
 
 # timestralR 0.4.0
 

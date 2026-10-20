@@ -313,7 +313,7 @@
                          anchor_scale)
 }
 
-#' Single-block forecast primitive (internal)
+## Single-block forecast primitive (internal)
 .predict_block <- function(model, inputs, observed, horizon_patches,
                            role_ids = NULL, known_future = NULL,
                            known_future_mask = NULL, groups = NULL) {

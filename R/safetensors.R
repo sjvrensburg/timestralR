@@ -39,6 +39,10 @@
 }
 
 #' Quantile levels returned by every Timestral forecast
+#'
+#' @return Numeric vector of 21 levels from 0.01 to 0.99.
+#' @examples
+#' timestral_levels()
 #' @export
 timestral_levels <- function() {
   c(0.01, 0.05, seq(0.1, 0.9, by = 0.05), 0.95, 0.99)
@@ -46,14 +50,21 @@ timestral_levels <- function() {
 
 .sizes <- c("5M", "28M", "123M", "209M")
 
-#' Download a Timestral checkpoint from the official Mistral AI Hub repo
+#' Download a Timestral checkpoint
 #'
-#' Downloads `config.json` and `model.safetensors` (cached per user). The
-#' weights are Mistral AI's, released under their Modified MIT licence.
+#' Downloads `config.json` and `model.safetensors` from the official
+#' Mistral AI Hugging Face repository (Modified MIT weights licence),
+#' cached per user. Set `HF_TOKEN` for authenticated downloads.
+#'
 #' @param size one of "5M", "28M", "123M", "209M"
 #' @param revision Hub revision (branch, tag or commit); default "main"
 #' @param cache_dir where to keep the files
 #' @param local_files_only only read from the cache, never download
+#' @return The checkpoint directory.
+#' @examples
+#' \dontrun{
+#' timestral_download("5M")
+#' }
 #' @export
 timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
                                revision = "main",
@@ -83,8 +94,11 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 }
 
 #' Load a Timestral model
-#' @param model a size ("5M", ...) to download/cache, or a local directory
-#'   holding `config.json` and `model.safetensors`
+#'
+#' Load a Timestral model from the official Mistral AI checkpoint.
+#'
+#' @param model a size ("5M", "28M", "123M", "209M") to download/cache, or
+#'   a local directory holding `config.json` and `model.safetensors`
 #' @param max_context context cap in steps; NULL (default) uses the trained
 #'   context length from the checkpoint, as in the Python package
 #' @param per_shot_horizon_patches patches decoded per block (capped at the
@@ -96,8 +110,16 @@ timestral_download <- function(size = c("5M", "28M", "123M", "209M"),
 #' @param revision Hub revision when `model` is a size
 #' @param cache_dir checkpoint cache directory when `model` is a size
 #' @param local_files_only only read from the cache, never download
-#' @param backend "native" (default) for the compiled RcppEigen block
-#'   implementation, "R" for the pure-R reference implementation
+#' @param backend "native" (default) uses the compiled RcppEigen
+#'   implementation of the transformer block; "R" uses the pure-R reference
+#'   implementation. Results are identical up to floating-point order.
+#' @return A `timestral_model` object.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' plot(fc)
+#' }
 #' @export
 timestral_load <- function(model = "5M", max_context = NULL,
                            per_shot_horizon_patches = 32L,

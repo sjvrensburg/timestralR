@@ -19,7 +19,7 @@
   as.integer(slot)
 }
 
-#' Smoothed mean-target encoding of one categorical covariate (internal)
+## Smoothed mean-target encoding of one categorical covariate (internal)
 .target_encode <- function(target_context, past_codes, future_codes = NULL,
                            smooth = 1.0) {
   target <- as.numeric(target_context)

@@ -8,3 +8,4 @@
 .ts_predict_block <- function(session, inputs, observed, horizon_patches, role_ids, known_future, known_future_mask, groups) {
     .Call(`_timestralR_ts_predict_block`, session, inputs, observed, horizon_patches, role_ids, known_future, known_future_mask, groups)
 }
+

@@ -25,17 +25,17 @@ END_RCPP
 }
 // ts_predict_block
 NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix observed, int horizon_patches, Nullable<IntegerVector> role_ids, Nullable<NumericMatrix> known_future, Nullable<LogicalMatrix> known_future_mask, Nullable<IntegerVector> groups);
-RcppExport SEXP _timestralR_ts_predict_block(SEXP sessionSEXP, SEXP inputsSEXP, SEXP observedSEXP, SEXP horizonPatchesSEXP, SEXP roleIdsSEXP, SEXP knownFutureSEXP, SEXP knownFutureMaskSEXP, SEXP groupsSEXP) {
+RcppExport SEXP _timestralR_ts_predict_block(SEXP sessionSEXP, SEXP inputsSEXP, SEXP observedSEXP, SEXP horizon_patchesSEXP, SEXP role_idsSEXP, SEXP known_futureSEXP, SEXP known_future_maskSEXP, SEXP groupsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type session(sessionSEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type inputs(inputsSEXP);
     Rcpp::traits::input_parameter< LogicalMatrix >::type observed(observedSEXP);
-    Rcpp::traits::input_parameter< int >::type horizon_patches(horizonPatchesSEXP);
-    Rcpp::traits::input_parameter< Nullable<IntegerVector> >::type role_ids(roleIdsSEXP);
-    Rcpp::traits::input_parameter< Nullable<NumericMatrix> >::type known_future(knownFutureSEXP);
-    Rcpp::traits::input_parameter< Nullable<LogicalMatrix> >::type known_future_mask(knownFutureMaskSEXP);
+    Rcpp::traits::input_parameter< int >::type horizon_patches(horizon_patchesSEXP);
+    Rcpp::traits::input_parameter< Nullable<IntegerVector> >::type role_ids(role_idsSEXP);
+    Rcpp::traits::input_parameter< Nullable<NumericMatrix> >::type known_future(known_futureSEXP);
+    Rcpp::traits::input_parameter< Nullable<LogicalMatrix> >::type known_future_mask(known_future_maskSEXP);
     Rcpp::traits::input_parameter< Nullable<IntegerVector> >::type groups(groupsSEXP);
     rcpp_result_gen = Rcpp::wrap(ts_predict_block(session, inputs, observed, horizon_patches, role_ids, known_future, known_future_mask, groups));
     return rcpp_result_gen;

@@ -284,14 +284,23 @@
       storage.mode(m) <- "double"
       m
     })
-    Ts <- vapply(parts, nrow, integer(1)); Vs <- vapply(parts, ncol, integer(1))
+    Ts <- unname(vapply(parts, nrow, integer(1)))
+    Vs <- unname(vapply(parts, ncol, integer(1)))
     if (length(unique(Ts)) != 1L || length(unique(Vs)) != 1L)
       stop("all series in a batch must have the same length and variate count")
     arr <- array(0, c(Ts[1], Vs[1], length(parts)))
     for (b in seq_along(parts)) arr[, , b] <- parts[[b]]
+    ## a time index (and ts attributes) shared by every series is kept
+    shared <- function(get) {
+      vals <- lapply(y, get)
+      if (is.null(vals[[1]]) ||
+          !all(vapply(vals, identical, logical(1), vals[[1]]))) NULL
+      else vals[[1]]
+    }
     return(list(arr = aperm(arr, c(3, 2, 1)), vnames = colnames(parts[[1]]),
-                tsp = tsp_y, index = NULL, T = Ts[1], V = Vs[1],
-                B = length(parts), snames = names(y)))
+                tsp = shared(function(e) if (stats::is.ts(e)) stats::tsp(e)),
+                index = shared(function(e) .strip_time_index(e)$index),
+                T = Ts[1], V = Vs[1], B = length(parts), snames = names(y)))
   }
   if (is.array(y) && length(dim(y)) == 3L) {
     storage.mode(y) <- "double"
@@ -309,22 +318,27 @@
 ## Covariates to a list of (C, L) matrices, one per series. Forms mirror y:
 ## vector/matrix (time in rows) for B=1, 3-D array (time, covariate, series),
 ## or a list of per-series matrices.
-.as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE) {
+.as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE,
+                          snames = NULL) {
   if (is.null(x)) return(NULL)
-  if (inherits(x, "tbl_ts")) {
-    gr <- .tsibble_groups(x)
-    if (length(gr$groups) != B)
-      stop(name, " tsibble must have one key group per series (", B, ")")
-    out <- lapply(gr$groups, function(m) {
-      if (nrow(m) != expected_len)
-        stop(name, " must have ", expected_len, " rows (time in rows), got ",
-             nrow(m))
-      t(m)
-    })
-    attr(out, "index") <- gr$index
-    return(out)
-  }
   cov_index <- NULL
+  if (inherits(x, "tbl_ts")) {
+    ## Per-key matrices, matched to the series of y by key value, then
+    ## validated like any other list of per-series covariates.
+    gr <- .tsibble_groups(x)
+    mats <- gr$groups
+    if (gr$keyed) {
+      if (is.null(snames) || length(mats) != B ||
+          !setequal(snames, gr$snames))
+        stop(name, " tsibble keys (", paste(gr$snames, collapse = ", "),
+             ") must match the series of y (",
+             if (is.null(snames)) "unnamed" else paste(snames, collapse = ", "),
+             ")")
+      mats <- mats[match(snames, gr$snames)]
+    }
+    x <- mats
+    cov_index <- gr$index
+  }
   one <- function(elt) {
     st <- .strip_time_index(elt)
     if (is.null(cov_index) && !is.null(st$index)) cov_index <<- st$index
@@ -357,10 +371,13 @@
 
 .as_obs_mask <- function(observation_mask, batch) {
   if (is.null(observation_mask)) return(NULL)
-  fake <- .batch_dispatch(observation_mask)
+  fake <- .batch_dispatch(observation_mask, allow_logical = TRUE)
   if (!identical(dim(fake$arr), dim(batch$arr)))
     stop("observation_mask must be shaped like the context")
-  fake$arr != 0
+  out <- fake$arr != 0
+  ## NA (e.g. rows added by filling tsibble gaps) marks a missing value
+  out[is.na(out)] <- FALSE
+  out
 }
 
 .combine_cov <- function(numeric_list, encoded_list, B) {
@@ -376,18 +393,26 @@
 
 #' Forecast one or more series
 #'
+#' Zero-shot probabilistic forecast with 21 quantiles per step.
+#'
 #' @param model a `timestral_model`
 #' @param y numeric vector, `ts`/`mts`, `zoo`/`xts` (index preserved), a
 #'   `tsibble` (keys become the batch, measured variables the jointly
 #'   forecast variates), matrix
 #'   or data frame with time in rows and one column per target variate, a 3-D
 #'   array (time, variate, series), or a list of per-series vectors/matrices
-#'   (NA = missing). Variates of a series are forecast jointly; series in a
+#'   (NA = missing; a time index shared by every series in the list is
+#'   kept). Variates of a series are forecast jointly; series in a
 #'   batch are forecast independently in one call. Covariates may also be
-#'   `ts`/`zoo`/`xts`; when both `y` and a covariate carry a time index, the
-#'   covariate index must align with the context (and future) index of `y`.
+#'   `ts`/`zoo`/`xts` or `tsibble`; when both `y` and a covariate carry a
+#'   time index, the covariate index must align with the context (and
+#'   future) index of `y`. Tsibble rows are taken in index order, and
+#'   implicit gaps in a regular tsibble are filled with missing values; the
+#'   keys of a keyed tsibble covariate are matched to the series of `y` by
+#'   value.
 #' @param h horizon in steps
-#' @param observation_mask optional logical shaped like `y`; FALSE marks
+#' @param observation_mask optional logical shaped like `y` (for a tsibble
+#'   `y`, a tsibble with logical measured variables); FALSE or NA marks
 #'   additional missing values
 #' @param past_covariates known over the context only (T time rows, or the
 #'   batch forms described for `y`)
@@ -404,6 +429,32 @@
 #'   and the context `index` and `future_index` when `y` carried a time
 #'   index (`ts`, `zoo`, `xts`); the future index extends the last observed
 #'   interval.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#'
+#' ## univariate ts: index preserved, fan chart and ts accessors work
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' plot(fc)
+#' timestral_median(fc)
+#'
+#' ## multivariate: columns of y are forecast jointly
+#' fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
+#'
+#' ## zoo/xts inputs keep their time index (needs the zoo package)
+#' if (requireNamespace("zoo", quietly = TRUE)) {
+#'   yz <- zoo::zoo(AirPassengers,
+#'                  order.by = as.Date(time(AirPassengers)))
+#'   fc3 <- timestral_forecast(m, yz, h = 24)
+#'   head(as_forecast_df(fc3))   # time column holds Dates
+#' }
+#'
+#' ## tsibble input: keys become the batch (needs the tsibble package)
+#' if (requireNamespace("tsibble", quietly = TRUE)) {
+#'   fc4 <- timestral_forecast(m, tsibble::as_tsibble(AirPassengers), h = 24)
+#'   tsibble::as_tsibble(fc4)
+#' }
+#' }
 #' @export
 timestral_forecast <- function(model, y, h, observation_mask = NULL,
                                past_covariates = NULL, known_covariates = NULL,
@@ -427,7 +478,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   inputs[!mask] <- 0
   cfg <- model$config
   get_cov <- function(x, len, nm, cat = FALSE) {
-    out <- .as_cov_batch(x, tg$B, len, nm, cat)
+    out <- .as_cov_batch(x, tg$B, len, nm, cat, tg$snames)
     if (!is.null(out) && !cfg$covariate_enabled)
       stop("this checkpoint was not trained with covariates; got ", nm)
     idx <- attr(out, "index")
@@ -507,20 +558,37 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
 }
 
 #' Median forecast
+#'
 #' @param fc a `timestral_forecast`
 #' @return The 0.5-quantile slice. For a single series forecast from a
 #'   `ts`, a `ts`/`mts` starting after the context; otherwise the same
 #'   slice of the quantiles array as before.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' timestral_median(fc)   # a ts, starting Jan 1961
+#' }
 #' @export
 timestral_median <- function(fc) {
   .maybe_ts(fc, .level_slice(fc, which(fc$levels == 0.5)))
 }
 
 #' Forecast at one quantile level
+#'
+#' Forecast at one quantile level; errors if `level` is not one of the
+#' model's quantile levels.
+#'
 #' @param fc a `timestral_forecast`
 #' @param level one of `timestral_levels()`
 #' @return The requested quantile slice, as a `ts`/`mts` for a single
 #'   series forecast from a `ts`, otherwise an array slice.
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' timestral_quantile(fc, 0.9)
+#' }
 #' @export
 timestral_quantile <- function(fc, level) {
   if (length(level) != 1 || !level %in% fc$levels)
@@ -543,8 +611,19 @@ print.timestral_forecast <- function(x, ...) {
   invisible(x)
 }
 
-#' Long data frame: variate, step, (time,) and one column per quantile level
+#' Forecast as a long data frame
+#'
+#' Long data frame: variate, step, (time,) and one column per quantile level.
+#'
 #' @param fc a `timestral_forecast`
+#' @return A data frame with variate, step, optional time, and one column
+#'   per quantile level (plus a series column for a batch).
+#' @examples
+#' \dontrun{
+#' m <- timestral_load("5M")
+#' fc <- timestral_forecast(m, AirPassengers, h = 24)
+#' head(as_forecast_df(fc))
+#' }
 #' @export
 as_forecast_df <- function(fc) {
   q <- fc$quantiles
