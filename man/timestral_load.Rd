@@ -10,7 +10,7 @@ timestral_load(
   per_shot_horizon_patches = 32L,
   quantile_real_cap_k = 10000,
   extreme_value_threshold = 1e+30,
-  revision = "main",
+  revision = NULL,
   cache_dir = tools::R_user_dir("timestralR", "cache"),
   local_files_only = FALSE,
   backend = c("native", "R")
@@ -32,7 +32,8 @@ plus/minus this multiple of the last patch scale; 0 disables}
 \item{extreme_value_threshold}{fed-back medians at or above this magnitude
 become 0}
 
-\item{revision}{Hub revision when \code{model} is a size}
+\item{revision}{Hub revision when \code{model} is a size; default \code{NULL}
+uses the pinned, hash-verified upstream commit for the size}
 
 \item{cache_dir}{checkpoint cache directory when \code{model} is a size}
 

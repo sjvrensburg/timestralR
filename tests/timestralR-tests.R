@@ -54,6 +54,31 @@ fc_tr <- timestral_forecast(m_tr, y, h = 48)
 fc_tr_R <- timestral_forecast(m_tr_R, y, h = 48)
 stopifnot(max(abs(fc_tr_R$quantiles - fc_tr$quantiles)) < 1e-10)
 
+## seeded parity fuzz: native and R backends agree across randomised
+## shapes, masks, covariates, batches and context truncation
+set.seed(20261020)
+.agree <- function(a, b, tol = 1e-8)
+  stopifnot(max(abs(a$quantiles - b$quantiles)) < tol)
+fz <- cumsum(rnorm(120)); fz[sample.int(120, 15)] <- NA
+.agree(timestral_forecast(m, fz, h = 30), timestral_forecast(m_R, fz, h = 30))
+fm <- cbind(cumsum(rnorm(90)), cumsum(rnorm(90)))
+.agree(timestral_forecast(m, fm, h = 20), timestral_forecast(m_R, fm, h = 20))
+fb <- list(cumsum(rnorm(70)), cumsum(rnorm(70)), cumsum(rnorm(70)))
+.agree(timestral_forecast(m, fb, h = 18), timestral_forecast(m_R, fb, h = 18))
+om_f <- sample(c(TRUE, FALSE), 120, replace = TRUE, prob = c(0.8, 0.2))
+.agree(timestral_forecast(m, fz, h = 24, observation_mask = om_f),
+       timestral_forecast(m_R, fz, h = 24, observation_mask = om_f))
+fp <- matrix(rnorm(96), ncol = 1); fk <- matrix(rnorm(120), ncol = 1)
+.agree(timestral_forecast(m, fz[1:96], h = 24,
+                          past_covariates = fp, known_covariates = fk),
+       timestral_forecast(m_R, fz[1:96], h = 24,
+                          past_covariates = fp, known_covariates = fk))
+fl <- cumsum(rnorm(300))
+m_s <- timestral_load(file.path(fx, "tiny"), max_context = 64L)
+m_sR <- timestral_load(file.path(fx, "tiny"), max_context = 64L, backend = "R")
+.agree(timestral_forecast(m_s, fl, h = 40),
+       timestral_forecast(m_sR, fl, h = 40))
+
 ## batch consistency: batched series equal one-at-a-time forecasts
 yb <- list(y, y2, rev(y))
 fcb <- timestral_forecast(m, yb, h = 24)
@@ -123,6 +148,20 @@ err <- tryCatch({
                                  groups = 1L)
   FALSE
 }, error = function(e) grepl("groups", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
+## pinned checkpoints: every size pinned, corrupt cache fails verification
+stopifnot(identical(sort(names(timestralR:::.pinned_checkpoints)),
+                    sort(timestralR:::.sizes)))
+bad_cache <- file.path(tempdir(), "badcache")
+bad_dir <- file.path(bad_cache, "5m",
+                     timestralR:::.pinned_checkpoints[["5M"]]$revision)
+dir.create(bad_dir, recursive = TRUE, showWarnings = FALSE)
+writeLines("{}", file.path(bad_dir, "config.json"))
+err <- tryCatch({
+  timestral_download("5M", cache_dir = bad_cache, local_files_only = TRUE)
+  FALSE
+}, error = function(e) grepl("SHA-256", conditionMessage(e)))
 stopifnot(isTRUE(err))
 
 ## regression: plotting an all-missing history gives a clear error
