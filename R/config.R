@@ -29,9 +29,10 @@
     stop("d_model=", cfg$d_model, " not divisible by num_heads=", cfg$num_heads)
   hd <- cfg$d_model %/% cfg$num_heads
   rope_dim <- as.integer(hd * cfg$rope_partial_factor)
-  if (rope_dim <= 0 || rope_dim %% 2 != 0)
+  if (rope_dim <= 0 || rope_dim %% 2 != 0 || rope_dim > hd)
     stop("rope_partial_factor=", cfg$rope_partial_factor,
-         " gives an invalid rope_dim=", rope_dim)
+         " gives an invalid rope_dim=", rope_dim,
+         " (must be positive, even, and <= head_dim=", hd, ")")
   bad_kind <- setdiff(cfg$block_schedule, names(.layer_kind_axes))
   if (length(bad_kind))
     stop("unknown layer kind ", bad_kind[1], "; expected one of ",

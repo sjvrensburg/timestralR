@@ -27,7 +27,9 @@
 - Documentation and `NAMESPACE` are generated with roxygen2; methods for
   ggplot2, tsibble and fabletools generics are registered through
   delayed `S3method()` entries instead of `.onLoad` hooks. DESCRIPTION
-  now states `Depends: R (>= 4.0.0)` (needed for `tools::R_user_dir()`).
+  now states `Depends: R (>= 4.1.0)` (the code uses the base pipe `|>`;
+  `tools::R_user_dir()` needs only 4.0.0), and `SystemRequirements`
+  states a C++17 compiler.
 - The native backend is split from one file into per-unit headers and
   implementation files (`session`, `nn_ops`, `scaler`, `masks`,
   `attention`, `transformer`, `head`, `predict`, plus the Rcpp entry

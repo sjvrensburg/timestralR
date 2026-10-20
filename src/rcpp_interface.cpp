@@ -65,6 +65,8 @@ NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix
   const Session& s = *sess;
   if (horizon_patches < 1) stop("horizon_patches must be >= 1");
   int R = inputs.nrow(), T = inputs.ncol();
+  if (observed.nrow() != R || observed.ncol() != T)
+    stop("observed must have the same dimensions as inputs");
   Eigen::Map<const MatrixXd> in_map(inputs.begin(), R, T);
   MatrixXd in = in_map;
   MaskMat obs(R, T);
@@ -73,6 +75,7 @@ NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix
   std::vector<int> grp(R, 1);
   if (groups.isNotNull()) {
     IntegerVector g(groups.get());
+    if (g.size() != R) stop("groups must have one entry per row of inputs");
     for (int r = 0; r < R; ++r) grp[r] = g[r];
   }
   std::vector<MatrixXd> preds;
@@ -80,6 +83,7 @@ NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix
   std::vector<int> roles;
   if (has_roles) {
     IntegerVector ri(role_ids.get());
+    if (ri.size() != R) stop("role_ids must have one entry per row of inputs");
     roles.assign(ri.begin(), ri.end());
   }
   bool all_target = !has_roles;
@@ -99,8 +103,14 @@ NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix
     full_obs.leftCols(T) = obs;
     kf.setZero(); kfm.setZero();
     if (known_future.isNotNull()) {
+      if (known_future_mask.isNull())
+        stop("known_future_mask must be supplied with known_future");
       NumericMatrix k(known_future.get());
       LogicalMatrix km(known_future_mask.get());
+      if (k.nrow() != R || k.ncol() != horizon_len ||
+          km.nrow() != R || km.ncol() != horizon_len)
+        stop("known_future and known_future_mask must be inputs rows x ",
+             "horizon steps");
       for (int r = 0; r < R; ++r)
         for (int t = 0; t < horizon_len; ++t) {
           kf(r, t) = k(r, t);

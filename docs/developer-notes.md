@@ -1,10 +1,10 @@
 # Developer notes
 
-## Internal interface freeze (handoff for a future C++ port)
+## Internal interface freeze (implemented native backend)
 
-The following internal shapes are the contract a native implementation must
-replace drop-in. Do not change them without updating the parity harness and
-golden fixtures.
+The following internal shapes are the contract the native implementation
+in `src/` replaces drop-in. Do not change them without updating the parity
+harness and golden fixtures.
 
 - `timestral_load()` returns a `timestral_model`: `weights` (named list of
   matrices/vectors exactly as in the safetensors file, biases present only

@@ -2,6 +2,8 @@
 
 #include <R_ext/BLAS.h>
 
+#include <cmath>
+
 namespace timestral {
 
 MatrixXd lin(const Session& s, const MatrixXd& X, const std::string& wname) {
@@ -55,6 +57,10 @@ MatrixXd mask_to_bias(const MaskMat& m) {
 
 MatrixXd softmax_bias(MatrixXd scores, const MatrixXd* bias) {
   if (bias) scores += *bias;
+  // Mirror R .softmax_rows: nonfinite scores become -1e30 before the max.
+  for (int i = 0; i < scores.rows(); ++i)
+    for (int j = 0; j < scores.cols(); ++j)
+      if (!std::isfinite(scores(i, j))) scores(i, j) = -1e30;
   for (int i = 0; i < scores.rows(); ++i) {
     double mx = scores.row(i).maxCoeff();
     double sum = 0;

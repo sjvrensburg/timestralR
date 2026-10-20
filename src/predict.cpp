@@ -54,7 +54,11 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
   int pos0 = 0;
   KVCache* ctx = nullptr;
   if (est_bytes <= 256.0 * 1024 * 1024) {
-    bool hit = cache.valid && cache.ll <= ll && cache.T <= T &&
+    // Any mutation or failed run below must not leave stale metadata
+    // claiming the cache is valid; it is re-marked only on success.
+    const bool was_valid = cache.valid;
+    cache.valid = false;
+    bool hit = was_valid && cache.ll <= ll && cache.T <= T &&
                cache.inputs.rows() == R && cache.groups == groups &&
                cache.first_obs == fo;
     if (hit)
