@@ -199,6 +199,13 @@ if (requireNamespace("forecast", quietly = TRUE)) {
   acc <- forecast::accuracy(fo, ap_te)
   stopifnot(all(is.finite(acc["Test set", c("ME", "RMSE", "MAE", "MASE")])))
   .expect_error(timestral_as_forecast(fc_ap, level = 95), "no quantile knot")
+  ## fractions are percentages, as in the forecast package
+  stopifnot(identical(timestral_as_forecast(fc_ap, level = c(0.8, 0.98))$upper,
+                      fo$upper))
+  .expect_error(timestral_as_forecast(fc_ap, variate = NA_real_),
+                "variate must")
+  .expect_error(forecast::forecast(m, ap_tr, h = 12, fan = TRUE),
+                "unsupported argument\\(s\\).*fan")
   .expect_error(timestral_as_forecast(timestral_forecast(m, y, h = 6)),
                 "ts time base")
   .expect_error(forecast::forecast(m, y, h = 6), "needs a ts")

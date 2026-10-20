@@ -659,12 +659,16 @@ predict.timestral_model <- function(object, newdata, h, ...) {
 
 ## Present a single-series level slice as a ts/mts when the input was a
 ## ts: time in rows, one column per variate, starting after the context.
+## A ts of forecast values starting one step after a context with `tsp`.
+.future_ts <- function(x, tsp) {
+  stats::ts(x, start = tsp[2] + 1 / tsp[3], frequency = tsp[3])
+}
+
 .maybe_ts <- function(fc, slice) {
   if (fc$n_series != 1L || is.null(fc$tsp)) return(slice)
   nv <- dim(fc$quantiles)[1]
   m <- matrix(slice[, , 1], nrow = nv)
-  out <- stats::ts(t(m), start = fc$tsp[2] + 1 / fc$tsp[3],
-                   frequency = fc$tsp[3])
+  out <- .future_ts(t(m), fc$tsp)
   if (nv > 1L) colnames(out) <- dimnames(fc$quantiles)[[1L]]
   out
 }

@@ -358,7 +358,8 @@
   }
   if (horizon_patches < 1)
     stop("horizon_patches must be >= 1, got ", horizon_patches)
-  if (is.null(role_ids) || !model$config$covariate_enabled || all(role_ids == 0L))
+  if (is.null(role_ids) || !timestral_supports_covariates(model) ||
+      all(role_ids == 0L))
     return(.predict_context_only(model, inputs, observed, horizon_patches, groups))
   if (horizon_patches > model$config$block_size)
     stop("decode block ", horizon_patches, " must be in [1, ",

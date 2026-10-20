@@ -22,8 +22,9 @@
 #'
 #' @param fc a `timestral_forecast` made from `ts` input, so it has a time
 #'   base
-#' @param level interval levels in percent; each must pair two quantile
-#'   knots (see Details)
+#' @param level interval levels in percent (fractions in (0, 1) are
+#'   taken as percentages, as in the forecast package); each must pair two
+#'   quantile knots (see Details)
 #' @param series which series of a batch forecast
 #' @param variate which variate, by index or name
 #' @return An object of class `"forecast"` with `mean`, `lower`, `upper`
@@ -49,6 +50,8 @@ timestral_as_forecast <- function(fc, level = c(80, 98), series = 1L,
   if (!is.numeric(level) || !length(level) || any(!is.finite(level)) ||
       any(level <= 0 | level >= 100))
     stop("level must hold interval levels in percent, between 0 and 100")
+  ## fractions are percentages, as in the forecast package
+  if (max(level) < 1) level <- 100 * level
   level <- sort(unique(level))
   pp <- .fc_plot_parts(fc, series)
   if (is.character(variate)) {
@@ -57,14 +60,13 @@ timestral_as_forecast <- function(fc, level = c(80, 98), series = 1L,
       stop("variate must be one of ", paste(pp$vnames, collapse = ", "))
   } else {
     vi <- variate
-    if (length(vi) != 1L || !is.numeric(vi) || vi < 1L || vi > pp$nv ||
-        vi != round(vi))
+    if (length(vi) != 1L || !is.numeric(vi) || !is.finite(vi) || vi < 1L ||
+        vi > pp$nv || vi != round(vi))
       stop("variate must be one variate index between 1 and ", pp$nv)
   }
   q <- pp$qmat(vi)
   tsp <- fc$tsp
-  fts <- function(v) stats::ts(v, start = tsp[2] + 1 / tsp[3],
-                               frequency = tsp[3])
+  fts <- function(v) .future_ts(v, tsp)
   lo <- vapply(level, function(L) q[, pp$knot((1 - L / 100) / 2)],
                numeric(fc$h))
   hi <- vapply(level, function(L) q[, pp$knot((1 + L / 100) / 2)],
@@ -97,7 +99,8 @@ timestral_as_forecast <- function(fc, level = c(80, 98), series = 1L,
 #' @param level interval levels in percent, each pairing two quantile knots
 #' @param variate which variate of a multivariate `y` to return
 #' @param ... further arguments to [timestral_forecast()], such as
-#'   covariates or `symmetric`
+#'   covariates or `symmetric`; other forecast-generic arguments (`fan`,
+#'   `lambda`, `biasadj`, ...) are rejected
 #' @return An object of class `"forecast"`.
 #' @examples
 #' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
@@ -111,6 +114,13 @@ forecast.timestral_model <- function(object, y, h, level = c(80, 98),
   if (!stats::is.ts(y))
     stop("forecast() for a timestral_model needs a ts; use ",
          "timestral_forecast() for other inputs")
+  ## forecast-generic arguments (fan, lambda, biasadj, ...) have no meaning
+  ## here; name them instead of failing inside timestral_forecast()
+  extra <- setdiff(names(list(...)), names(formals(timestral_forecast)))
+  if (length(extra))
+    stop("unsupported argument(s) for a timestral_model: ",
+         paste(extra, collapse = ", "), "; forecast() passes only ",
+         "timestral_forecast() arguments through `...`")
   timestral_as_forecast(timestral_forecast(object, y, h = h, ...),
                         level = level, variate = variate)
 }

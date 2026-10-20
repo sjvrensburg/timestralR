@@ -19,7 +19,8 @@ whose columns are forecast jointly; pick the column with \code{variate})}
 \item{variate}{which variate of a multivariate \code{y} to return}
 
 \item{...}{further arguments to \code{\link[=timestral_forecast]{timestral_forecast()}}, such as
-covariates or \code{symmetric}}
+covariates or \code{symmetric}; other forecast-generic arguments (\code{fan},
+\code{lambda}, \code{biasadj}, ...) are rejected}
 }
 \value{
 An object of class \code{"forecast"}.

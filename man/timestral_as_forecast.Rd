@@ -10,8 +10,9 @@ timestral_as_forecast(fc, level = c(80, 98), series = 1L, variate = 1L)
 \item{fc}{a \code{timestral_forecast} made from \code{ts} input, so it has a time
 base}
 
-\item{level}{interval levels in percent; each must pair two quantile
-knots (see Details)}
+\item{level}{interval levels in percent (fractions in (0, 1) are
+taken as percentages, as in the forecast package); each must pair two
+quantile knots (see Details)}
 
 \item{series}{which series of a batch forecast}
 

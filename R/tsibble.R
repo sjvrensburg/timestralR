@@ -77,9 +77,7 @@
 ## ...), so forecasts join with and score against the observed tsibble.
 .tidy_future_index <- function(x) {
   if (!is.null(x$tsp)) {
-    tsp <- x$tsp
-    dummy <- stats::ts(numeric(x$h), start = tsp[2] + 1 / tsp[3],
-                       frequency = tsp[3])
+    dummy <- .future_ts(numeric(x$h), x$tsp)
     return(tsibble::as_tsibble(dummy)$index)
   }
   x$future_index
