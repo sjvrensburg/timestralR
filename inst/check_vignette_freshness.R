@@ -1,8 +1,9 @@
 ## Vignette freshness check: the precomputed vignettes/timestralR.Rmd must
 ## contain exactly the echoed R code chunks of
-## vignettes/timestralR.Rmd.orig. Fails when the .orig is edited without
-## re-running vignettes/precompile.R, or when the generated .Rmd is
-## edited by hand. Run from the package root:
+## vignettes/timestralR.Rmd.orig, and the same prose (non-chunk lines).
+## Fails when the .orig is edited without re-running
+## vignettes/precompile.R, or when the generated .Rmd is edited by hand.
+## Run from the package root:
 ##   Rscript inst/check_vignette_freshness.R
 
 orig <- file.path("vignettes", "timestralR.Rmd.orig")
@@ -39,5 +40,28 @@ code_gen <- norm(.chunks(gen, source = FALSE))
 code_gen <- code_gen[!grepl("^#>", code_gen)]
 if (!identical(code_orig, code_gen))
   stop("vignettes/timestralR.Rmd is stale: its code chunks differ from ",
+       "vignettes/timestralR.Rmd.orig; re-run vignettes/precompile.R")
+
+## Prose: lines outside code chunks must also match. knitr copies prose
+## verbatim, drops include=FALSE chunks entirely, and emits figure links
+## (from chunk fig.cap) that have no prose counterpart in the .orig, so
+## blank lines and generated figure links are excluded on both sides.
+.prose <- function(path) {
+  lines <- readLines(path, warn = FALSE)
+  out <- character(0)
+  in_chunk <- FALSE
+  for (ln in lines) {
+    if (!in_chunk && grepl("^```.*\\{?r([ ,}]|$)", ln)) {
+      in_chunk <- TRUE
+      next
+    }
+    if (in_chunk && grepl("^```\\s*$", ln)) { in_chunk <- FALSE; next }
+    if (!in_chunk) out <- c(out, ln)
+  }
+  out <- trimws(out, which = "right")
+  out[nzchar(trimws(out)) & !grepl("^!\\[.*\\]\\(figures/", out)]
+}
+if (!identical(.prose(orig), .prose(gen)))
+  stop("vignettes/timestralR.Rmd is stale: its prose differs from ",
        "vignettes/timestralR.Rmd.orig; re-run vignettes/precompile.R")
 cat("vignette is fresh\n")

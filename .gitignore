@@ -5,3 +5,4 @@ timestralR_*.tar.gz
 timestralR.Rcheck/
 src/*.o
 src/*.so
+coverage.xml

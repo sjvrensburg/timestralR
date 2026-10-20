@@ -113,7 +113,12 @@ Native-backend timings are in `docs/developer-notes.md` (209M: batch of 10
 in 2.3 s, long-context worst case in 5.0 s on the development machine).
 
 Reproduce with `inst/parity_official.R` (developer machine only; end
-users never need Python).
+users never need Python). One case is also gated in CI: the 5M
+`univariate_missing` forecast is committed as a golden fixture
+(`tests/fixtures/{input,golden}_5m_univariate.csv`, generated once by
+`inst/make_5m_fixture.R` from the official package) and the weekly
+real-checkpoint run asserts the native forecast matches it to the
+parity gate above.
 
 ## Not yet supported
 

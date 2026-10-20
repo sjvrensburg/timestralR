@@ -103,7 +103,12 @@ multivariate, numeric covariates, long horizon, long context cap, batch of
 knobs): worst `max_rel` 2.0e-6 on 5M (gate: < 2e-5). 123M: 9.6e-6, 209M:
 2.6e-6 on the original six cases. Synthetic config variants (biases,
 no gates, no asinh, alternate schedules) in `inst/synthetic_parity.R`:
-< 2.3e-7.
+< 2.3e-7. The 5M `univariate_missing` case is committed as a golden
+fixture (`tests/fixtures/{input,golden}_5m_univariate.csv`, generated
+by `inst/make_5m_fixture.R`; measured 3.1e-7 at generation) and is
+asserted at the same 2e-5 gate by the weekly real-checkpoint CI run,
+so the 5M parity claim is regression-gated without Python in CI; the
+other sizes' parity figures above remain developer-machine results.
 
 Threading constraint: the native backend must stay single-threaded — no
 OpenMP, thread pools, or setting BLAS thread counts. R users routinely
