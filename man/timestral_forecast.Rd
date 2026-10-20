@@ -35,7 +35,7 @@ implicit gaps in a regular tsibble are filled with missing values; the
 keys of a keyed tsibble covariate are matched to the series of \code{y} by
 value.}
 
-\item{h}{horizon in steps}
+\item{h}{horizon in steps: a single whole number between 1 and 10000}
 
 \item{observation_mask}{optional logical shaped like \code{y} (for a tsibble
 \code{y}, a tsibble with logical measured variables); FALSE or NA marks

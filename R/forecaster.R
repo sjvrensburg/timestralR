@@ -20,6 +20,55 @@
   x
 }
 
+## Upper bound on the forecast horizon, in steps. Without it a huge (or
+## non-finite) h either hangs the decode loop or overflows to NA when
+## coerced to integer; 10,000 steps is far beyond any sane forecast.
+.max_horizon <- 10000L
+
+.validate_horizon <- function(h) {
+  if (length(h) != 1L || is.logical(h) || !is.numeric(h) || is.complex(h))
+    stop("h (prediction_length) must be a single finite number >= 1")
+  if (!is.finite(h) || h < 1)
+    stop("h (prediction_length) must be >= 1, got ", format(h))
+  if (h != floor(h))
+    stop("h (prediction_length) must be a whole number of steps, got ", format(h))
+  if (h > .max_horizon)
+    stop("h (prediction_length) must be <= ", .max_horizon, ", got ", format(h))
+  as.integer(h)
+}
+
+## Fail closed on non-numeric series data instead of silently coercing
+## (as.numeric() turns character/factor/complex/Date input into NA codes
+## or nonsense, which used to forecast as if it were real data). Numeric
+## (double/integer) vectors, matrices, arrays and data frames with only
+## numeric columns are accepted; ts/zoo/xts wrappers have already been
+## stripped to their values by the time this is called.
+.check_numeric_input <- function(x, name = "y", allow_logical = FALSE) {
+  if (allow_logical && is.logical(x)) return(invisible(TRUE))
+  if (is.factor(x))
+    stop(name, " must be numeric, not a factor; convert it explicitly ",
+         "(e.g. as.numeric()) if the factor codes are the data")
+  if (is.data.frame(x)) {
+    ok_types <- c("double", "integer", if (allow_logical) "logical")
+    for (nm in names(x)) {
+      col <- x[[nm]]
+      if (is.factor(col) || !(typeof(col) %in% ok_types) ||
+          inherits(col, c("Date", "POSIXt", "difftime")))
+        stop(name, " column '", nm, "' must be numeric, not ",
+             paste(class(col), collapse = "/"))
+    }
+    return(invisible(TRUE))
+  }
+  if (!(typeof(x) %in% c("double", "integer")) ||
+      inherits(x, c("Date", "POSIXt", "difftime")))
+    stop(name, " must be numeric (double or integer), not ",
+         if (length(class(x)) > 1L || class(x) != typeof(x))
+           paste0(paste(class(x), collapse = "/"), " (", typeof(x), ")")
+         else typeof(x),
+         "; convert it explicitly if the values really are the series")
+  invisible(TRUE)
+}
+
 .pad_to_patch <- function(inputs, mask, ps) {
   ctx <- ncol(inputs)
   if (ctx %% ps == 0L) return(list(x = inputs, m = mask))
@@ -32,6 +81,9 @@
 ## series (NULL entries allowed). Rows are packed series-major, as upstream.
 .assemble_rows <- function(model, inputs, mask, h, past, known) {
   ps <- model$config$patch_size
+  if (length(dim(inputs)) != 3L || any(dim(inputs) == 0L))
+    stop("inputs must be a non-empty (series, variate, time) array; ",
+         "at least one series, variate and time step is required")
   B <- dim(inputs)[1]; n_tgt <- dim(inputs)[2]; T_len <- dim(inputs)[3]
   horizon <- ceiling(h / ps) * ps
   rows_list <- list(); mask_list <- list()
@@ -273,15 +325,26 @@
 ## Normalise y to a (B, V, T) array. Accepted forms: numeric vector (B=V=1),
 ## ts/mts, zoo/xts, matrix/data frame with time in rows (B=1), 3-D array
 ## (time, variate, series), or a list of per-series vectors/matrices.
-.as_batch <- function(y) {
+.as_batch <- function(y, allow_logical = FALSE) {
+  if (is.null(y))
+    stop("y must have at least one time step (got NULL)")
   tsp_y <- if (stats::is.ts(y)) stats::tsp(y) else NULL
   stripped <- .strip_time_index(y)
   y <- stripped$values
   if (is.list(y) && !is.data.frame(y)) {
+    if (length(y) == 0L)
+      stop("y must contain at least one series (got an empty list)")
     parts <- lapply(y, function(elt) {
       elt <- .strip_time_index(elt)$values
+      if (is.null(elt))
+        stop("every series in y must have at least one time step (got NULL)")
+      .check_numeric_input(elt, "y", allow_logical)
       m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
       storage.mode(m) <- "double"
+      if (nrow(m) == 0L)
+        stop("y must have at least one time step (got a series of length 0)")
+      if (ncol(m) == 0L)
+        stop("y must have at least one variate (got 0 columns)")
       m
     })
     Ts <- unname(vapply(parts, nrow, integer(1)))
@@ -303,13 +366,22 @@
                 T = Ts[1], V = Vs[1], B = length(parts), snames = names(y)))
   }
   if (is.array(y) && length(dim(y)) == 3L) {
+    .check_numeric_input(y, "y", allow_logical)
+    if (any(dim(y) == 0L))
+      stop("y must have at least one time step, one variate and one series ",
+           "(got dimensions ", paste(dim(y), collapse = " x "), ")")
     storage.mode(y) <- "double"
     return(list(arr = aperm(y, c(3, 2, 1)), vnames = dimnames(y)[[2]],
                 tsp = tsp_y, index = NULL, T = dim(y)[1], V = dim(y)[2],
                 B = dim(y)[3], snames = dimnames(y)[[3]]))
   }
+  .check_numeric_input(y, "y", allow_logical)
   ym <- if (is.null(dim(y))) matrix(as.numeric(y), ncol = 1) else as.matrix(y)
   storage.mode(ym) <- "double"
+  if (nrow(ym) == 0L)
+    stop("y must have at least one time step (got length 0)")
+  if (ncol(ym) == 0L)
+    stop("y must have at least one variate (got 0 columns)")
   arr <- aperm(array(ym, c(nrow(ym), ncol(ym), 1)), c(3, 2, 1))
   list(arr = arr, vnames = colnames(ym), tsp = tsp_y, index = stripped$index,
        T = nrow(ym), V = ncol(ym), B = 1L, snames = NULL)
@@ -343,6 +415,9 @@
     st <- .strip_time_index(elt)
     if (is.null(cov_index) && !is.null(st$index)) cov_index <<- st$index
     elt <- st$values
+    if (is.null(elt))
+      stop(name, " must have ", expected_len, " rows (time in rows), got NULL")
+    .check_numeric_input(elt, name)
     m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
     storage.mode(m) <- "double"
     if (nrow(m) != expected_len)
@@ -410,7 +485,7 @@
 #'   implicit gaps in a regular tsibble are filled with missing values; the
 #'   keys of a keyed tsibble covariate are matched to the series of `y` by
 #'   value.
-#' @param h horizon in steps
+#' @param h horizon in steps: a single whole number between 1 and 10000
 #' @param observation_mask optional logical shaped like `y` (for a tsibble
 #'   `y`, a tsibble with logical measured variables); FALSE or NA marks
 #'   additional missing values
@@ -462,15 +537,19 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
                                categorical_known_covariates = NULL,
                                symmetric = TRUE, clip_nonnegative = TRUE) {
   stopifnot(inherits(model, "timestral_model"))
-  if (length(h) != 1 || is.na(h) || h < 1)
-    stop("h (prediction_length) must be >= 1, got ", h)
-  h <- as.integer(h)
+  h <- .validate_horizon(h)
   tg <- .batch_dispatch(y)
   future_idx <- .future_index(tg$index, h)
   inputs <- tg$arr
   mask <- is.finite(inputs)
   om <- .as_obs_mask(observation_mask, tg)
   if (!is.null(om)) mask <- mask & om
+  for (b in seq_len(tg$B)) {
+    if (!any(mask[b, , ]))
+      stop("series ", if (is.null(tg$snames)) b else tg$snames[b],
+           " of y has no finite observed values; a forecast needs at ",
+           "least one finite (non-NA, non-infinite) observation per series")
+  }
   observed_arr <- inputs
   observed_arr[!mask] <- NA_real_
   dimnames(observed_arr) <- list(series = tg$snames, variate = tg$vnames,

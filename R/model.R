@@ -317,6 +317,38 @@
 .predict_block <- function(model, inputs, observed, horizon_patches,
                            role_ids = NULL, known_future = NULL,
                            known_future_mask = NULL, groups = NULL) {
+  ps <- model$config$patch_size
+  if (!is.matrix(inputs) || !(typeof(inputs) %in% c("double", "integer")))
+    stop("inputs must be a numeric matrix")
+  if (!is.matrix(observed) || !is.logical(observed) ||
+      !identical(dim(inputs), dim(observed)))
+    stop("observed must be a logical matrix with the same dimensions as inputs")
+  if (anyNA(observed))
+    stop("observed must not contain NA")
+  if (nrow(inputs) < 1L)
+    stop("inputs must have at least one row (R >= 1), got ", nrow(inputs))
+  if (ncol(inputs) < ps)
+    stop("inputs must have at least patch_size (", ps, ") columns, got ",
+         ncol(inputs))
+  if (ncol(inputs) %% ps != 0L)
+    stop("the number of columns of inputs (", ncol(inputs),
+         ") must be a multiple of patch_size (", ps, ")")
+  if (any(!is.finite(inputs[observed])))
+    stop("inputs must be finite where observed is TRUE")
+  if (length(horizon_patches) != 1L || !is.numeric(horizon_patches) ||
+      !is.finite(horizon_patches) || horizon_patches < 1 ||
+      horizon_patches != floor(horizon_patches))
+    stop("horizon_patches must be >= 1, got ", format(horizon_patches))
+  if (horizon_patches * ps > 10000L)
+    stop("horizon_patches (", horizon_patches, ") would produce more than ",
+         "10000 forecast steps")
+  horizon_patches <- as.integer(horizon_patches)
+  if (!is.null(role_ids) &&
+      (length(role_ids) != nrow(inputs) || anyNA(role_ids) ||
+       !all(role_ids %in% c(0L, 1L, 2L))))
+    stop("role_ids must have one entry per row of inputs, with values in {0, 1, 2} and no NA")
+  if (!is.null(groups) && (length(groups) != nrow(inputs) || anyNA(groups)))
+    stop("groups must have one entry per row of inputs and no NA")
   if (!is.null(model$session)) {
     return(.ts_predict_block(model$session, inputs, observed,
                              as.integer(horizon_patches),
