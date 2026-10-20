@@ -30,4 +30,9 @@ Useful links:
 \author{
 \strong{Maintainer}: Stefan Janse van Rensburg \email{sjansevanrensburg@gmail.com}
 
+Other contributors:
+\itemize{
+  \item Mistral AI (authors of the 'timestral' Python package ported in R/ and src/) [copyright holder]
+}
+
 }

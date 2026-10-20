@@ -17,9 +17,9 @@ per quantile level (plus a series column for a batch).
 Long data frame: variate, step, (time,) and one column per quantile level.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 head(as_forecast_df(fc))
-}
 }

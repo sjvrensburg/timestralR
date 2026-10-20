@@ -24,7 +24,7 @@
     i <- which.min(abs(fc$levels - p))
     if (abs(fc$levels[i] - p) > 1e-9)
       stop("no quantile knot at level ", p, "; available levels are in ",
-           "timestral_levels() (interval levels must pair two knots)")
+           "the forecast's $levels (interval levels must pair two knots)")
     i
   }
   list(obs = obs, nv = nrow(obs), vnames = vnames, times = times,
@@ -47,11 +47,11 @@
 #' @param ... passed to [graphics::plot()]
 #' @return `x`, invisibly
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' plot(fc)
-#' }
 #' @export
 plot.timestral_forecast <- function(x, series = 1L,
                                     levels = c(0.5, 0.8, 0.9, 0.98),
@@ -78,7 +78,7 @@ plot.timestral_forecast <- function(x, series = 1L,
     a <- max(which(finite))
     anchor_t <- times[a]; anchor_y <- hist_y[a]
     ylim <- range(c(hist_y[finite],
-                    q[, knot(0.01)], q[, knot(0.99)]), finite = TRUE)
+                    q[, 1L], q[, ncol(q)]), finite = TRUE)
     graphics::plot(times, hist_y, type = "n", xlim = range(c(times, ftimes)),
                    ylim = ylim, xlab = xlab,
                    ylab = if (is.null(ylab)) vnames[v] else ylab,

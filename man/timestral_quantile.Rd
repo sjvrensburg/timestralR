@@ -9,7 +9,7 @@ timestral_quantile(fc, level)
 \arguments{
 \item{fc}{a \code{timestral_forecast}}
 
-\item{level}{one of \code{timestral_levels()}}
+\item{level}{one of the forecast's quantile levels, \code{fc$levels}}
 }
 \value{
 The requested quantile slice, as a \code{ts}/\code{mts} for a single
@@ -20,9 +20,9 @@ Forecast at one quantile level; errors if \code{level} is not one of the
 model's quantile levels.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 timestral_quantile(fc, 0.9)
-}
 }

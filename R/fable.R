@@ -64,12 +64,13 @@
 #' @param ... passed to the model definition (currently unused)
 #' @return a fable model definition, for use inside `fabletools::model()`
 #' @examples
-#' \dontrun{
-#' library(fable)
-#' m <- timestral_load("5M")
-#' fit <- as_tsibble(AirPassengers) |>
-#'   model(timestral = TIMESTRAL(value, model = m))
-#' fit |> forecast(h = 24)
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
+#' if (requireNamespace("fable", quietly = TRUE)) {
+#'   fit <- tsibble::as_tsibble(AirPassengers) |>
+#'     fabletools::model(timestral = TIMESTRAL(value, model = m))
+#'   fit |> fabletools::forecast(h = 24)
 #' }
 #' @export
 TIMESTRAL <- function(formula, model, symmetric = TRUE,
@@ -140,11 +141,14 @@ model_sum.model_timestral <- function(x) "TIMESTRAL"
 #' @param ... ignored
 #' @return a `fbl_ts` forecast table
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
-#' fabletools::as_fable(fc)
-#' }
+#' if (requireNamespace("tsibble", quietly = TRUE) &&
+#'     requireNamespace("distributional", quietly = TRUE) &&
+#'     requireNamespace("fabletools", quietly = TRUE))
+#'   fabletools::as_fable(fc)
 #' @exportS3Method fabletools::as_fable
 as_fable.timestral_forecast <- function(x, ...) {
   if (is.null(x$future_index))

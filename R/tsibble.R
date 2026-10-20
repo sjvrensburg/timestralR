@@ -111,11 +111,12 @@
 #' @param ... ignored
 #' @return a `tsibble` (`tbl_ts`)
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
-#' tsibble::as_tsibble(fc)
-#' }
+#' if (requireNamespace("tsibble", quietly = TRUE))
+#'   tsibble::as_tsibble(fc)
 #' @exportS3Method tsibble::as_tsibble
 as_tsibble.timestral_forecast <- function(x, ...) {
   if (is.null(x$future_index))

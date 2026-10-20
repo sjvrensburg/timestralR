@@ -1,14 +1,14 @@
 ## Regression tests for past native/config/cache/plot bugs.
-## Sourced by tests/timestralR-tests.R; expects `m`, `y`, `fx`.
+## Sourced by tests/timestralR-tests.R; expects `m`, `y`, `fx`, `tiny`.
 ## regression: rope_dim must not exceed head_dim (native OOB write otherwise)
-cfg_rope <- jsonlite::fromJSON(file.path(fx, "tiny", "config.json"))
+cfg_rope <- jsonlite::fromJSON(file.path(tiny, "config.json"))
 cfg_rope$rope_partial_factor <- 2.0
 err <- tryCatch({ timestralR:::.validate_config(cfg_rope); FALSE },
                 error = function(e) grepl("rope_dim", conditionMessage(e)))
 stopifnot(isTRUE(err))
 
 ## regression: truncated safetensors must error, not recycle short reads
-st_src <- file.path(fx, "tiny", "model.safetensors")
+st_src <- file.path(tiny, "model.safetensors")
 st_bytes <- readBin(st_src, "raw", n = file.info(st_src)$size)
 st_trunc <- file.path(tempdir(), "truncated.safetensors")
 writeBin(st_bytes[seq_len(length(st_bytes) %/% 2)], st_trunc)
@@ -37,6 +37,52 @@ err <- tryCatch({
   timestral_download("5M", cache_dir = bad_cache, local_files_only = TRUE)
   FALSE
 }, error = function(e) grepl("SHA-256", conditionMessage(e)))
+stopifnot(isTRUE(err))
+## the official repository ID keeps the size's pin (same corrupt cache)
+err <- tryCatch({
+  timestral_download("mistralai/Timestral-5M", cache_dir = bad_cache,
+                     local_files_only = TRUE)
+  FALSE
+}, error = function(e) grepl("SHA-256", conditionMessage(e)))
+stopifnot(isTRUE(err))
+
+## Hub repository IDs, offline against a pre-filled cache: a branch name
+## resolves through refs/, a commit is used directly, and the loaded
+## checkpoint forecasts like the local directory it was copied from
+hub_cache <- file.path(tempdir(), "hubcache")
+hub_sha <- strrep("ab", 20)
+hub_dir <- file.path(hub_cache, "hub", "acme--tiny-ts", hub_sha)
+dir.create(hub_dir, recursive = TRUE, showWarnings = FALSE)
+file.copy(file.path(tiny, c("config.json", "model.safetensors")), hub_dir)
+dir.create(file.path(hub_cache, "hub", "acme--tiny-ts", "refs"),
+           showWarnings = FALSE)
+writeLines(hub_sha, file.path(hub_cache, "hub", "acme--tiny-ts", "refs", "main"))
+stopifnot(identical(
+  timestral_download("acme/tiny-ts", cache_dir = hub_cache,
+                     local_files_only = TRUE), hub_dir))
+stopifnot(identical(
+  timestral_download("acme/tiny-ts", revision = hub_sha,
+                     cache_dir = hub_cache, local_files_only = TRUE), hub_dir))
+m_hub <- timestral_load("acme/tiny-ts", max_context = 4096L,
+                        cache_dir = hub_cache, local_files_only = TRUE)
+stopifnot(identical(timestral_forecast(m_hub, y, h = 24)$quantiles,
+                    timestral_forecast(m, y, h = 24)$quantiles))
+err <- tryCatch({
+  timestral_download("acme/tiny-ts", revision = "dev", cache_dir = hub_cache,
+                     local_files_only = TRUE)
+  FALSE
+}, error = function(e) grepl("local_files_only", conditionMessage(e)))
+stopifnot(isTRUE(err))
+for (bad in list("not a repo", "a/b/c", NA_character_, c("5M", "28M"), 5)) {
+  err <- tryCatch({ timestral_download(bad); FALSE },
+                  error = function(e) grepl("'model' must", conditionMessage(e)))
+  stopifnot(isTRUE(err))
+}
+err <- tryCatch({
+  timestral_download("acme/tiny-ts", revision = "..", cache_dir = hub_cache,
+                     local_files_only = TRUE)
+  FALSE
+}, error = function(e) grepl("'revision' must", conditionMessage(e)))
 stopifnot(isTRUE(err))
 
 ## regression: an all-missing history is rejected at forecast time
@@ -143,7 +189,7 @@ bad <- .native_cfg(); bad$num_heads <- NULL
 .expect_error(timestralR:::.ts_load(m$weights, bad), "missing required field")
 bad <- .native_cfg(); bad$patch_size <- 0L
 .expect_error(timestralR:::.validate_config(
-  modifyList(jsonlite::fromJSON(file.path(fx, "tiny", "config.json")), bad)),
+  modifyList(jsonlite::fromJSON(file.path(tiny, "config.json")), bad)),
   "patch_size")
 
 ## regression (audit 3): parallel downloads get distinct .part files
@@ -153,3 +199,37 @@ stopifnot(length(unique(tmps)) == 4L,
           all(dirname(tmps) == dirname(dest)),
           all(endsWith(tmps, ".part")),
           !any(tmps == paste0(dest, ".part")))
+
+## regression: forecast quantile levels come from the checkpoint's knots,
+## not the official timestral_levels() (fine-tuned Hub checkpoints may
+## differ); asymmetric knots refuse symmetric averaging
+.knot_ckpt <- function(knots) {
+  d <- file.path(tempfile("knots-"))
+  dir.create(d)
+  file.copy(file.path(tiny, "model.safetensors"), d)
+  cfg <- jsonlite::fromJSON(file.path(tiny, "config.json"))
+  cfg$quantile_knots <- knots
+  jsonlite::write_json(cfg, file.path(d, "config.json"), auto_unbox = TRUE,
+                       digits = NA)
+  d
+}
+kn_sym <- timestral_levels()
+kn_sym[c(1, 21)] <- c(0.02, 0.98)
+m_kn <- timestral_load(.knot_ckpt(kn_sym), max_context = 4096L)
+fc_kn <- timestral_forecast(m_kn, AirPassengers, h = 6)
+stopifnot(isTRUE(all.equal(fc_kn$levels, kn_sym, tolerance = 1e-12)),
+          identical(dimnames(fc_kn$quantiles)$level, format(kn_sym)),
+          identical(as.numeric(timestral_quantile(fc_kn, 0.02)),
+                    as.numeric(fc_kn$quantiles[1, , 1])))
+.expect_error(timestral_quantile(fc_kn, 0.01), "quantile levels")
+pdf(NULL); plot(fc_kn, levels = c(0.5, 0.8, 0.96)); dev.off()
+kn_asym <- timestral_levels()
+kn_asym[1] <- 0.02
+m_ka <- timestral_load(.knot_ckpt(kn_asym), max_context = 4096L)
+.expect_error(timestral_forecast(m_ka, AirPassengers, h = 6),
+              "symmetric = FALSE")
+stopifnot(identical(timestral_forecast(m_ka, AirPassengers, h = 6,
+                                       symmetric = FALSE)$levels[1], 0.02))
+## a literal level and timestral_levels()' seq() value pick the same knot
+stopifnot(identical(timestral_quantile(fc, 0.15),
+                    timestral_quantile(fc, timestral_levels()[4])))

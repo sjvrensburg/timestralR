@@ -68,9 +68,9 @@ interval.
 Zero-shot probabilistic forecast with 21 quantiles per step.
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
-
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 ## univariate ts: index preserved, fan chart and ts accessors work
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 plot(fc)
@@ -81,8 +81,9 @@ fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
 
 ## zoo/xts inputs keep their time index (needs the zoo package)
 if (requireNamespace("zoo", quietly = TRUE)) {
-  yz <- zoo::zoo(AirPassengers,
-                 order.by = as.Date(time(AirPassengers)))
+  months <- seq(as.Date("1949-01-01"), by = "month",
+                length.out = length(AirPassengers))
+  yz <- zoo::zoo(as.numeric(AirPassengers), order.by = months)
   fc3 <- timestral_forecast(m, yz, h = 24)
   head(as_forecast_df(fc3))   # time column holds Dates
 }
@@ -91,6 +92,5 @@ if (requireNamespace("zoo", quietly = TRUE)) {
 if (requireNamespace("tsibble", quietly = TRUE)) {
   fc4 <- timestral_forecast(m, tsibble::as_tsibble(AirPassengers), h = 24)
   tsibble::as_tsibble(fc4)
-}
 }
 }

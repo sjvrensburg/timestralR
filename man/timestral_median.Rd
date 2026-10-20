@@ -18,9 +18,9 @@ slice of the quantiles array as before.
 Median forecast
 }
 \examples{
-\dontrun{
-m <- timestral_load("5M")
+## the tiny bundled checkpoint runs offline but its forecasts are
+## meaningless; use timestral_load("5M") or larger for real ones
+m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 fc <- timestral_forecast(m, AirPassengers, h = 24)
 timestral_median(fc)   # a ts, starting Jan 1961
-}
 }

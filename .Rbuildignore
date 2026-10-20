@@ -2,5 +2,6 @@
 ^\.venv$
 ^\.gitignore$
 ^AGENTS\.md$
+^CLAUDE\.md$
 ^vignettes/.*\.orig$
 ^vignettes/precompile\.R$

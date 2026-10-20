@@ -1,3 +1,31 @@
+# timestralR (development version)
+
+- `timestral_load()` and `timestral_download()` accept any Hugging Face
+  Hub repository ID (`"owner/name"`) holding a Timestral checkpoint, for
+  example a fine-tuned model, as well as the four sizes. The official
+  repositories (`"mistralai/Timestral-5M"`, ...) keep their pinned,
+  hash-verified commits however they are named. Branch and tag revisions
+  are resolved to their current commit on the Hub and the resolution is
+  cached for `local_files_only` use, so a moving branch such as `"main"`
+  no longer stays frozen at its first download. Both functions gain a
+  `token` argument (default: the `HF_TOKEN` environment variable).
+- The first argument of `timestral_download()` is renamed from `size` to
+  `model`, matching `timestral_load()`. Positional calls are unaffected;
+  calls written as `size = "5M"` must use `model = "5M"`.
+- Forecasts take their quantile levels (`fc$levels` and the `level`
+  dimnames) from the checkpoint's `quantile_knots` instead of always
+  using `timestral_levels()`, so checkpoints with other knots are
+  labelled correctly; `symmetric = TRUE` now errors for knots that are
+  not symmetric about 0.5, as upstream does, instead of silently
+  averaging mismatched levels. `plot()` scales its y axis to the
+  outermost knots rather than requiring 0.01 and 0.99.
+- Licence field tightened to `Apache License (== 2.0)`, the licence of
+  the upstream 'timestral' package the code is ported from, and Mistral
+  AI is credited as copyright holder of the ported code.
+- The tiny random-weight test checkpoint now ships in `inst/extdata/tiny`,
+  so every example except the downloads runs offline under
+  `R CMD check`.
+
 # timestralR 0.5.0
 
 - Input validation hardening: `timestral_forecast()` now errors (instead

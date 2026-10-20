@@ -505,9 +505,9 @@
 #'   index (`ts`, `zoo`, `xts`); the future index extends the last observed
 #'   interval.
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
-#'
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' ## univariate ts: index preserved, fan chart and ts accessors work
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' plot(fc)
@@ -518,8 +518,9 @@
 #'
 #' ## zoo/xts inputs keep their time index (needs the zoo package)
 #' if (requireNamespace("zoo", quietly = TRUE)) {
-#'   yz <- zoo::zoo(AirPassengers,
-#'                  order.by = as.Date(time(AirPassengers)))
+#'   months <- seq(as.Date("1949-01-01"), by = "month",
+#'                 length.out = length(AirPassengers))
+#'   yz <- zoo::zoo(as.numeric(AirPassengers), order.by = months)
 #'   fc3 <- timestral_forecast(m, yz, h = 24)
 #'   head(as_forecast_df(fc3))   # time column holds Dates
 #' }
@@ -528,7 +529,6 @@
 #' if (requireNamespace("tsibble", quietly = TRUE)) {
 #'   fc4 <- timestral_forecast(m, tsibble::as_tsibble(AirPassengers), h = 24)
 #'   tsibble::as_tsibble(fc4)
-#' }
 #' }
 #' @export
 timestral_forecast <- function(model, y, h, observation_mask = NULL,
@@ -585,6 +585,12 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   known <- .combine_cov(known_num, enc_known, tg$B)
   if (!is.null(known) && !cfg$supports_known_covariates)
     stop("this checkpoint cannot condition on known-future covariates")
+  ## quantile levels come from the checkpoint (fine-tuned checkpoints may
+  ## use other knots than timestral_levels())
+  levels <- cfg$quantile_knots
+  if (isTRUE(symmetric) && any(abs(levels + rev(levels) - 1) >= 1e-9))
+    stop("symmetric averaging needs quantile levels symmetric about 0.5; ",
+         "this checkpoint's levels are not, so use symmetric = FALSE")
   q <- .forecast_raw(model, inputs, mask, h, past, known)
   if (isTRUE(symmetric)) {
     negate <- function(lst) if (is.null(lst)) NULL else lapply(lst, function(m) -m)
@@ -605,14 +611,14 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
     q1 <- q[1, , , , drop = FALSE]
     dim(q1) <- dim(q1)[2:4]
     dimnames(q1) <- list(variate = vnames, step = seq_len(h),
-                         level = format(timestral_levels()))
+                         level = format(levels))
     out_q <- q1
   } else {
     dimnames(q) <- list(series = snames, variate = vnames, step = seq_len(h),
-                        level = format(timestral_levels()))
+                        level = format(levels))
     out_q <- q
   }
-  structure(list(quantiles = out_q, levels = timestral_levels(), h = h,
+  structure(list(quantiles = out_q, levels = levels, h = h,
                  tsp = tg$tsp, n = tg$T, n_series = tg$B,
                  observed = observed_arr, index = tg$index,
                  index_var = tg$index_var, future_index = future_idx),
@@ -643,14 +649,14 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
 #'   `ts`, a `ts`/`mts` starting after the context; otherwise the same
 #'   slice of the quantiles array as before.
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' timestral_median(fc)   # a ts, starting Jan 1961
-#' }
 #' @export
 timestral_median <- function(fc) {
-  .maybe_ts(fc, .level_slice(fc, which(fc$levels == 0.5)))
+  .maybe_ts(fc, .level_slice(fc, which(abs(fc$levels - 0.5) < 1e-9)))
 }
 
 #' Forecast at one quantile level
@@ -659,20 +665,24 @@ timestral_median <- function(fc) {
 #' model's quantile levels.
 #'
 #' @param fc a `timestral_forecast`
-#' @param level one of `timestral_levels()`
+#' @param level one of the forecast's quantile levels, `fc$levels`
 #' @return The requested quantile slice, as a `ts`/`mts` for a single
 #'   series forecast from a `ts`, otherwise an array slice.
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' timestral_quantile(fc, 0.9)
-#' }
 #' @export
 timestral_quantile <- function(fc, level) {
-  if (length(level) != 1 || !level %in% fc$levels)
+  ## levels match to 1e-9: a literal 0.15 and seq()'s 0.15000000000000002
+  ## name the same knot
+  i <- if (is.numeric(level) && length(level) == 1 && is.finite(level))
+    which(abs(fc$levels - level) < 1e-9)
+  if (length(i) != 1)
     stop("level ", level, " is not one of the model's quantile levels")
-  .maybe_ts(fc, .level_slice(fc, match(level, fc$levels)))
+  .maybe_ts(fc, .level_slice(fc, i))
 }
 
 #' @export
@@ -698,11 +708,11 @@ print.timestral_forecast <- function(x, ...) {
 #' @return A data frame with variate, step, optional time, and one column
 #'   per quantile level (plus a series column for a batch).
 #' @examples
-#' \dontrun{
-#' m <- timestral_load("5M")
+#' ## the tiny bundled checkpoint runs offline but its forecasts are
+#' ## meaningless; use timestral_load("5M") or larger for real ones
+#' m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 #' fc <- timestral_forecast(m, AirPassengers, h = 24)
 #' head(as_forecast_df(fc))
-#' }
 #' @export
 as_forecast_df <- function(fc) {
   q <- fc$quantiles
