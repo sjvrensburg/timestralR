@@ -112,6 +112,37 @@ etc.), and nested C++/BLAS threading oversubscribes cores inside their
 workers. Speed work must therefore be algorithmic or single-threaded
 kernel work, never added parallelism.
 
-Remaining profiling note: inside the native block, attention score/softmax
-loops are the next target if more speed is needed; the R-side refinement
-(`R/forecaster.R`) and scaler are minor.
+Profiling notes (209M, temporary in-code timers, since removed; do not
+re-litigate these without new measurements on a different machine or a
+different model size):
+
+- The `lin` GEMMs dominate every benchmark case (roughly 80–95% of the
+  summed section time). Broken down by weight, the ranking is stable
+  across the long-context-cap, batch-10, long-horizon and multivariate
+  cases: MLP up-projection `w12` 32–36%, attention QKV projection
+  22–25%, MLP down-projection `w3` 16–17%, attention gate ~8%, attention
+  output projection `wO` 7–8%. Grouped: the MLP is about half of all
+  native time, the attention projections about 38%, and the patch/head
+  projections ~1.5%. These are plain large fp64 GEMMs already routed to
+  the system BLAS; there is no structural fat around them to trim, and
+  the only remaining levers are doing fewer of them or renegotiating
+  the fp64 parity contract (fp32/int8 are otherwise off the table, as
+  are threads and `-march=native` — see the threading constraint above
+  and the parity gates).
+- Attention scores, softmax and the probability×V products together are
+  at most ~12% (long-context-cap case) and ~4% elsewhere, so attention
+  kernel work has a hard ceiling of a few percent end-to-end. Within
+  softmax, masked entries (causal/missing bias of -1e30) now skip the
+  `exp` call — the result is exactly 0 there, and an all-masked row
+  keeps the uniform probabilities — which halved softmax time (0.24 s
+  -> 0.13 s on the long-context-cap case) for a ~2% end-to-end gain,
+  with bit-identical outputs. Two measured dead ends: fusing the bias
+  add into scalar max/exp passes (0.24 s -> 0.34 s; loses Eigen
+  vectorisation), and a transposed (keys x queries) softmax layout
+  (0.24 s -> 0.45 s; Eigen `exp` loses to libm `exp` at `-march=x86-64`).
+  Both were tried and reverted; do not re-try them unchanged.
+- The R-side refinement (`R/forecaster.R`) and scaler are minor. The one
+  large algorithmic idea left is K/V reuse across the sliding-window
+  (context-truncation) case via re-rotating cached RoPE keys, which
+  would need its exactness re-proven against the parity fixtures before
+  adoption.

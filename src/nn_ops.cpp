@@ -65,7 +65,12 @@ MatrixXd softmax_bias(MatrixXd scores, const MatrixXd* bias) {
     double mx = scores.row(i).maxCoeff();
     double sum = 0;
     for (int j = 0; j < scores.cols(); ++j) {
-      scores(i, j) = std::exp(scores(i, j) - mx);
+      // A masked entry (-1e30) against a finite row max exponentiates to
+      // exactly 0; skip the exp call for it. When the whole row is masked
+      // (mx == -1e30) the shortcut stays off, preserving the uniform
+      // probabilities exp(0)/nc that R produces there.
+      double v = scores(i, j);
+      scores(i, j) = (v == -1e30 && mx != -1e30) ? 0.0 : std::exp(v - mx);
       sum += scores(i, j);
     }
     scores.row(i) *= (1.0 / sum);
