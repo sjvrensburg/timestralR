@@ -162,6 +162,9 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' made one origin at a time, batching the series of a list `y` within
 #' each origin.
 #'
+#' For tsibble data, use `tsibble::stretch_tsibble()` with the
+#' [TIMESTRAL()] fable model and `fabletools::accuracy()` instead.
+#'
 #' @section Speed:
 #' With the native backend, a forecast reuses the work done on the leading
 #' patches its context shares with an earlier origin's context (a K/V
@@ -173,9 +176,6 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' time on long series. The cache is not used when covariates are given
 #' (an `observation_mask` is fine), nor once a context is longer than the
 #' model's `max_context`, which slides the window.
-#'
-#' For tsibble data, use `tsibble::stretch_tsibble()` with the
-#' [TIMESTRAL()] fable model and `fabletools::accuracy()` instead.
 #'
 #' @section Parallel use:
 #' The backtest is single-threaded, like the rest of the package. To run

@@ -154,3 +154,22 @@ for (len in c(200, 120, 136, 260)) {
     stopifnot(max(abs(got$quantiles - ref$quantiles)) < 1e-10)
   }
 }
+
+## the cache is actually used: a forecast after one from a congruent
+## origin reuses that origin's patches in both the forward and mirrored
+## pass, and the backtest's run order makes that happen (70 and 102 are
+## congruent modulo 16, 85 is not and would otherwise evict them)
+.reused <- function(mod) timestralR:::.ts_cache_stats(mod$session)$patches_reused
+.fresh <- function() timestral_load(tiny, max_context = 4096L)
+.cost <- function(o) {   # patches a forecast from o reuses on a cold model
+  mf <- .fresh(); timestral_forecast(mf, y_kv[seq_len(o), ], h = 40); .reused(mf)
+}
+ll70 <- ceiling(70 / m$config$patch_size)
+m_w <- .fresh()
+invisible(timestral_forecast(m_w, y_kv[seq_len(70), ], h = 40))
+r0 <- .reused(m_w)
+invisible(timestral_forecast(m_w, y_kv[seq_len(102), ], h = 40))
+stopifnot(.reused(m_w) - r0 - .cost(102) == 2 * ll70)
+m_b <- .fresh()
+invisible(timestral_backtest(m_b, y_kv, h = 40, origins = c(70, 85, 102)))
+stopifnot(.reused(m_b) - (.cost(70) + .cost(85) + .cost(102)) == 2 * ll70)

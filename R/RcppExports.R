@@ -9,3 +9,7 @@
     .Call(`_timestralR_ts_predict_block`, session, inputs, observed, horizon_patches, role_ids, known_future, known_future_mask, groups)
 }
 
+.ts_cache_stats <- function(session) {
+    .Call(`_timestralR_ts_cache_stats`, session)
+}
+

@@ -64,6 +64,9 @@ struct Session {
   std::unordered_map<std::string, VectorXd> vecs;
   mutable std::array<KVCache, 2> caches;
   mutable unsigned long cache_clock = 0;
+  // context-only calls that reused cached patches, and how many patches
+  // (summed over calls) were reused; read by .ts_cache_stats for tests
+  mutable double cache_hits = 0, cache_patches_reused = 0, cache_calls = 0;
   bool has_mat(const std::string& n) const;
   bool has_vec(const std::string& n) const;
   const RowMat& mat(const std::string& n) const;

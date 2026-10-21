@@ -41,10 +41,22 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// ts_cache_stats
+List ts_cache_stats(SEXP session);
+RcppExport SEXP _timestralR_ts_cache_stats(SEXP sessionSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type session(sessionSEXP);
+    rcpp_result_gen = Rcpp::wrap(ts_cache_stats(session));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_timestralR_ts_load", (DL_FUNC) &_timestralR_ts_load, 2},
     {"_timestralR_ts_predict_block", (DL_FUNC) &_timestralR_ts_predict_block, 8},
+    {"_timestralR_ts_cache_stats", (DL_FUNC) &_timestralR_ts_cache_stats, 1},
     {NULL, NULL, 0}
 };
 

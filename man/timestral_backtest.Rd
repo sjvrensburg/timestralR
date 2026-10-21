@@ -63,6 +63,9 @@ mask marks as missing are not scored either (their scores are \code{NA}).
 Forecasts are
 made one origin at a time, batching the series of a list \code{y} within
 each origin.
+
+For tsibble data, use \code{tsibble::stretch_tsibble()} with the
+\code{\link[=TIMESTRAL]{TIMESTRAL()}} fable model and \code{fabletools::accuracy()} instead.
 }
 \section{Speed}{
 
@@ -76,9 +79,6 @@ is a multiple of it (or \code{origins} that mostly are) roughly halves the
 time on long series. The cache is not used when covariates are given
 (an \code{observation_mask} is fine), nor once a context is longer than the
 model's \code{max_context}, which slides the window.
-
-For tsibble data, use \code{tsibble::stretch_tsibble()} with the
-\code{\link[=TIMESTRAL]{TIMESTRAL()}} fable model and \code{fabletools::accuracy()} instead.
 }
 
 \section{Parallel use}{

@@ -102,15 +102,20 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
     // Any mutation or failed run below must not leave stale metadata
     // claiming the cache is valid; it is re-marked only on success.
     cache.valid = false;
+    ++s.cache_calls;
     if (shared > 0) {
+      ++s.cache_hits;
+      s.cache_patches_reused += shared;
       pos0 = shared;
       for (int li = 0; li < n_layers; ++li)
         for (int r = 0; r < R; ++r) {
-          MatrixXd nk(ll, s.cfg.d_model), nv(ll, s.cfg.d_model);
-          nk.setZero(); nv.setZero();
-          nk.topRows(shared) = cache.K[li][r].topRows(shared);
-          nv.topRows(shared) = cache.V[li][r].topRows(shared);
-          cache.K[li][r].swap(nk); cache.V[li][r].swap(nv);
+          // keep the shared rows, zero the rest (rows pos0.. are recomputed)
+          MatrixXd& k = cache.K[li][r];
+          MatrixXd& v = cache.V[li][r];
+          k.conservativeResize(ll, Eigen::NoChange);
+          v.conservativeResize(ll, Eigen::NoChange);
+          k.bottomRows(ll - shared).setZero();
+          v.bottomRows(ll - shared).setZero();
         }
     } else {
       cache.K.assign(n_layers, std::vector<MatrixXd>(R, MatrixXd::Zero(ll, s.cfg.d_model)));
