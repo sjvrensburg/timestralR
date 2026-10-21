@@ -5,6 +5,7 @@
 #include "scaler.h"
 #include "transformer.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace timestral {
@@ -32,6 +33,22 @@ std::vector<MatrixXd> run_two_stream(const Session& s, const std::vector<MatrixX
   return monotone_head_batch(s, dec);
 }
 
+// Number of leading patches whose inputs and observed flags match the
+// entry's in every row; 0 when the entry cannot be reused at all.
+int shared_patches(const KVCache& c, const MatrixXd& inputs, const MaskMat& observed,
+                   const std::vector<int>& groups, const std::vector<int>& fo, int ps) {
+  if (!c.valid || c.inputs.rows() != inputs.rows() || c.groups != groups ||
+      c.first_obs != fo)
+    return 0;
+  const int R = inputs.rows(), n = std::min(c.ll, (int)inputs.cols() / ps);
+  for (int p = 0; p < n; ++p)
+    for (int r = 0; r < R; ++r)
+      for (int t = p * ps; t < (p + 1) * ps; ++t)
+        if (inputs(r, t) != c.inputs(r, t) || observed(r, t) != c.observed(r, t))
+          return p;
+  return n;
+}
+
 }  // namespace
 
 std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inputs,
@@ -52,35 +69,48 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
   MatrixXd positions(R, ll + h);
   for (int r = 0; r < R; ++r)
     for (int i = 0; i < ll + h; ++i) positions(r, i) = i - fo[r];
-  // Cache decision: reuse is exact iff the new context extends the cached
-  // one bit-for-bit with the same grouping and first-observed patches.
-  KVCache& cache = s.cache;
+  // Cache decision: reuse the entry sharing the most leading patches with
+  // these inputs (exact, see KVCache); on no match evict the LRU entry.
   const int n_layers = (int)s.cfg.block_schedule.size();
+  const double kCap = 256.0 * 1024 * 1024;
   const double est_bytes = (double)n_layers * R * ll * s.cfg.d_model * 2 * sizeof(double);
   int pos0 = 0;
   KVCache* ctx = nullptr;
-  if (est_bytes <= 256.0 * 1024 * 1024) {
+  if (est_bytes <= kCap) {
+    int best = -1, shared = 0;
+    for (int e = 0; e < (int)s.caches.size(); ++e) {
+      int p = shared_patches(s.caches[e], inputs, observed, groups, fo, ps);
+      if (p > shared) { shared = p; best = e; }
+    }
+    if (best < 0) {
+      best = 0;
+      for (int e = 1; e < (int)s.caches.size(); ++e) {
+        const KVCache& c = s.caches[e];
+        const KVCache& b = s.caches[best];
+        if (!c.valid ? b.valid : (b.valid && c.last_use < b.last_use)) best = e;
+      }
+    }
+    KVCache& cache = s.caches[best];
+    // the entries together stay within the cap: drop any other entry the
+    // new one would push over it
+    for (int e = 0; e < (int)s.caches.size(); ++e) {
+      KVCache& o = s.caches[e];
+      if (e == best || !o.valid) continue;
+      double ob = (double)n_layers * o.inputs.rows() * o.ll * s.cfg.d_model * 2 * sizeof(double);
+      if (est_bytes + ob > kCap) { o = KVCache(); }
+    }
     // Any mutation or failed run below must not leave stale metadata
     // claiming the cache is valid; it is re-marked only on success.
-    const bool was_valid = cache.valid;
     cache.valid = false;
-    bool hit = was_valid && cache.ll <= ll && cache.T <= T &&
-               cache.inputs.rows() == R && cache.groups == groups &&
-               cache.first_obs == fo;
-    if (hit)
-      for (int r = 0; r < R && hit; ++r)
-        for (int t = 0; t < cache.T; ++t)
-          if (inputs(r, t) != cache.inputs(r, t) ||
-              observed(r, t) != cache.observed(r, t)) { hit = false; break; }
-    if (hit) {
-      pos0 = cache.ll;
+    if (shared > 0) {
+      pos0 = shared;
       for (int li = 0; li < n_layers; ++li)
         for (int r = 0; r < R; ++r) {
           MatrixXd nk(ll, s.cfg.d_model), nv(ll, s.cfg.d_model);
           nk.setZero(); nv.setZero();
-          nk.topRows(cache.ll) = cache.K[li][r];
-          nv.topRows(cache.ll) = cache.V[li][r];
-          cache.K[li][r] = nk; cache.V[li][r] = nv;
+          nk.topRows(shared) = cache.K[li][r].topRows(shared);
+          nv.topRows(shared) = cache.V[li][r].topRows(shared);
+          cache.K[li][r].swap(nk); cache.V[li][r].swap(nv);
         }
     } else {
       cache.K.assign(n_layers, std::vector<MatrixXd>(R, MatrixXd::Zero(ll, s.cfg.d_model)));
@@ -92,9 +122,10 @@ std::vector<MatrixXd> predict_context_only(const Session& s, const MatrixXd& inp
   auto x_dec = forecast_tokens(s, R, h);
   auto preds = run_two_stream(s, x_enc, x_dec, tm, vm, positions, ctx, pos0);
   if (ctx) {
-    cache.inputs = inputs; cache.observed = observed;
-    cache.groups = groups; cache.first_obs = fo;
-    cache.T = T; cache.ll = ll; cache.valid = true;
+    ctx->inputs = inputs; ctx->observed = observed;
+    ctx->groups = groups; ctx->first_obs = fo;
+    ctx->T = T; ctx->ll = ll; ctx->valid = true;
+    ctx->last_use = ++s.cache_clock;
   }
   VectorXd al(R), as(R);
   for (int r = 0; r < R; ++r) { al(r) = sc.loc(r, T - 1); as(r) = sc.scale(r, T - 1); }

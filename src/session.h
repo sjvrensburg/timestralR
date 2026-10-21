@@ -9,6 +9,7 @@
 
 #include <RcppEigen.h>
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,19 +34,22 @@ struct Cfg {
   int median_index() const;
 };
 
-// Cross-block K/V cache for the context-only decode path. The R decode
-// loop (.block_ar_decode) issues one .ts_predict_block call per block with
-// the median feedback appended to the context. Because the time mask is
-// causal, the scaler is causal, and positions depend only on the first
-// observed patch, an earlier context patch's per-layer K/V cannot change
-// when later patches are appended; if the new inputs extend the cached
-// inputs exactly (same rows/groups/first-observed), the cached K/V are
-// reused and only the appended patches plus the new decode tokens are run
-// through the transformer. K/V are stored per layer and row as (ll, D) in
-// head-block layout, K after RoPE. Single-entry: an interleaved different
-// sequence (e.g. the mirrored forecast) simply misses and rebuilds.
+// K/V cache for the context-only decode path. The R decode loop
+// (.block_ar_decode) issues one .ts_predict_block call per block with the
+// median feedback appended to the context, and a backtest forecasts from
+// successive origins whose contexts share their leading patches. Because
+// the time mask is causal, the scaler is causal, and positions depend only
+// on the first observed patch, a context patch's per-layer K/V depend only
+// on that patch and the ones before it; so the K/V of every leading patch
+// whose inputs match the cached ones exactly (same rows/groups/
+// first-observed) are reused and only the remaining patches plus the new
+// decode tokens are run through the transformer. K/V are stored per layer
+// and row as (ll, D) in head-block layout, K after RoPE. Two entries,
+// least recently used evicted, so the forward and mirrored sequences of a
+// symmetric forecast each keep their own entry.
 struct KVCache {
   bool valid = false;
+  unsigned long last_use = 0;
   int T = 0, ll = 0;
   MatrixXd inputs;
   MaskMat observed;
@@ -58,7 +62,8 @@ struct Session {
   Cfg cfg;
   std::unordered_map<std::string, RowMat> mats;
   std::unordered_map<std::string, VectorXd> vecs;
-  mutable KVCache cache;
+  mutable std::array<KVCache, 2> caches;
+  mutable unsigned long cache_clock = 0;
   bool has_mat(const std::string& n) const;
   bool has_vec(const std::string& n) const;
   const RowMat& mat(const std::string& n) const;

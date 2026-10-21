@@ -162,6 +162,18 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' made one origin at a time, batching the series of a list `y` within
 #' each origin.
 #'
+#' @section Speed:
+#' With the native backend, a forecast reuses the work done on the leading
+#' patches its context shares with an earlier origin's context (a K/V
+#' cache; results are unchanged up to rounding, about `1e-13`). Contexts
+#' are left-padded to whole patches, so two origins share patches only
+#' when they differ by a multiple of the patch size
+#' (`m$config$patch_size`, 32 for the official checkpoints): a `step` that
+#' is a multiple of it (or `origins` that mostly are) roughly halves the
+#' time on long series. The cache is not used when covariates are given
+#' (an `observation_mask` is fine), nor once a context is longer than the
+#' model's `max_context`, which slides the window.
+#'
 #' For tsibble data, use `tsibble::stretch_tsibble()` with the
 #' [TIMESTRAL()] fable model and `fabletools::accuracy()` instead.
 #'
@@ -306,7 +318,11 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   }
   forecasts <- if (keep_forecasts) vector("list", length(origins))
   rows <- vector("list", length(origins))
-  for (i in seq_along(origins)) {
+  ## origins congruent modulo patch_size pad alike, so the later one's
+  ## context starts with the earlier one's patches and the native K/V cache
+  ## reuses them; run each such class in turn (results stay in origin order)
+  ps <- model$config$patch_size
+  for (i in order(origins %% ps, origins)) {
     o <- origins[i]
     ctx <- arr[, , seq_len(o), drop = FALSE]
     call_args <- c(list(model, as_input(ctx), h = h), opts)

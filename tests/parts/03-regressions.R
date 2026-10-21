@@ -65,8 +65,9 @@ stopifnot(identical(
                      cache_dir = hub_cache, local_files_only = TRUE), hub_dir))
 m_hub <- timestral_load("acme/tiny-ts", max_context = 4096L,
                         cache_dir = hub_cache, local_files_only = TRUE)
-stopifnot(identical(timestral_forecast(m_hub, y, h = 24)$quantiles,
-                    timestral_forecast(m, y, h = 24)$quantiles))
+## the K/V cache of the warm `m` makes the two agree to ~1e-14, not bit-for-bit
+stopifnot(max(abs(timestral_forecast(m_hub, y, h = 24)$quantiles -
+                  timestral_forecast(m, y, h = 24)$quantiles)) < 1e-10)
 err <- tryCatch({
   timestral_download("acme/tiny-ts", revision = "dev", cache_dir = hub_cache,
                      local_files_only = TRUE)
