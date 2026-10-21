@@ -21,7 +21,8 @@ timestral_backtest(
 
 \item{y}{the series to backtest: a numeric vector, \code{ts}/\code{mts},
 \code{zoo}/\code{xts}, a matrix or data frame with time in rows, or a list of
-equal-length series (forecast as a batch at each origin)}
+series (forecast as a batch at each origin; series of unequal length
+end together, see \code{\link[=timestral_forecast]{timestral_forecast()}})}
 
 \item{h}{forecast horizon in steps}
 

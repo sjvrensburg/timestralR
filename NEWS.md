@@ -1,5 +1,14 @@
 # timestralR (development version)
 
+- Batches may hold series of unequal length (a list `y`, or tsibble key
+  groups that start at different times): series are taken to end at the
+  same time and shorter ones are left-padded with missing values, which
+  leaves each series' forecast unchanged (as upstream, where padding is
+  left to the caller). Covariates and observation masks of a shorter
+  series may have its own length. A list keeps the longest series' time
+  index when the others' indexes are its tail. `timestral_backtest()`
+  takes such batches too, with origins on the longest series' time axis.
+
 - `timestral_backtest()` runs a rolling-origin backtest: it forecasts
   from a sequence of origins using only the data up to each one (with
   covariates and the observation mask cut to match), and returns one

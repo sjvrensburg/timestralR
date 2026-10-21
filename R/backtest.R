@@ -130,16 +130,19 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 
 ## Per-series covariates as a list of matrices with time in rows, parsed
 ## and validated by timestral_forecast()'s own parser at their full length.
-.cov_list <- function(x, B, name, snames) {
+## The full length is that of a longest series' covariates; those of a
+## shorter (left-padded) series may have its own length and are padded.
+.cov_list <- function(x, B, name, snames, pad) {
   if (inherits(x, "tbl_ts"))
     stop("timestral_backtest() does not take tsibble covariates; see ",
          "?timestral_backtest for tsibble data")
-  first <- if (is.list(x) && !is.data.frame(x)) x[[1L]] else x
+  full <- if (is.list(x) && !is.data.frame(x) && length(x) == B)
+    x[[which.min(pad)]] else x
   len <- if (is.array(x) && length(dim(x)) == 3L) dim(x)[1]
-    else NROW(.strip_time_index(first)$values)
+    else NROW(.strip_time_index(full)$values)
   parsed <- .as_cov_batch(x, B, len, name,
                           categorical = grepl("^categorical", name),
-                          snames = snames)
+                          snames = snames, pad = pad)
   lapply(parsed, t)
 }
 
@@ -189,7 +192,8 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' @param model a `timestral_model` from [timestral_load()]
 #' @param y the series to backtest: a numeric vector, `ts`/`mts`,
 #'   `zoo`/`xts`, a matrix or data frame with time in rows, or a list of
-#'   equal-length series (forecast as a batch at each origin)
+#'   series (forecast as a batch at each origin; series of unequal length
+#'   end together, see [timestral_forecast()])
 #' @param h forecast horizon in steps
 #' @param origins forecast origins as time indices (the last context
 #'   step); overrides `initial` and `step`
@@ -280,7 +284,7 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   known_names <- c("known_covariates", "categorical_known_covariates")
   cov_names <- intersect(names(args), c(past_names, known_names))
   covs <- stats::setNames(lapply(cov_names, function(nm)
-    .cov_list(args[[nm]], tg$B, nm, tg$snames)), cov_names)
+    .cov_list(args[[nm]], tg$B, nm, tg$snames, tg$pad)), cov_names)
   covs <- covs[lengths(covs) > 0L]   # zero-column covariates: none
   for (nm in names(covs)) {
     need <- if (nm %in% known_names) max(origins) + h else max(origins)

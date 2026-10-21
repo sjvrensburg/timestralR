@@ -189,9 +189,11 @@ autoplot(fc_mv) +
 ```
 
 **Batches** are independent series forecast in one call. Pass a list of
-series (or a 3-D array). The series must have the same length, and the
-result gains a leading series dimension. A time index shared by every
-series in the list is kept.
+series (or a 3-D array), and the result gains a leading series
+dimension. The series may differ in length: they are taken to end at the
+same time, and shorter ones are padded at the start with missing values,
+which leaves their forecasts unchanged. The longest series' time index is
+kept when every other series' index is its tail.
 
 ```{r batch, fig.cap = "Three independent series forecast in a single batched call.", fig.height = 5.5, message = FALSE}
 batch <- list(total = ldeaths, male = mdeaths, female = fdeaths)
@@ -573,7 +575,9 @@ ggplot(rbind(data.frame(step = by_step$step, score = "absolute error",
 Covariates and `observation_mask` are passed over the whole series and
 cut to each origin: past-only covariates and the mask to the context,
 known-future covariates to the context plus the horizon. A list of
-equal-length series is backtested as a batch at each origin. The
+series is backtested as a batch at each origin (unequal lengths are
+end-aligned, as in `timestral_forecast()`, so origins count time steps
+of the longest series). The
 backtest runs one origin after another; to spread origins over cores,
 split them and run one backtest per chunk (see `?timestral_backtest`
 and the next section). For tsibbles, the fable route covers the same
@@ -622,8 +626,8 @@ c(native = timing(m), R = timing(m_R))
 The native code is deliberately **single-threaded**: no OpenMP, no
 thread pools, and no changes to BLAS threading. Parallelise at the R
 level instead (`parallel`, `future`, `mirai`, ...), with one model per
-worker. For many series of the same length, batching (section 3) is
-usually the faster option; for a long backtest, split the origins
+worker. For many series of similar length, batching (section 3) is
+usually the faster option (a batch costs as much as its longest series); for a long backtest, split the origins
 between workers.
 
 ```{r parallel, eval = FALSE}

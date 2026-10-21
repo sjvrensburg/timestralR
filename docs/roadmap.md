@@ -75,5 +75,6 @@ Decisions taken, for reference when extending them:
   cache) and contexts past `max_context` (RoPE positions shift).
 - **Scaled scores:** MASE or scaled CRPS need a baseline (seasonal naive)
   and a seasonal period.
-- **Unequal-length batches:** a list `y` must have equal-length series,
-  as in `timestral_forecast()`.
+- ~~**Unequal-length batches**~~ (done): series are end-aligned and
+  left-padded with NA (exact: padding does not change a forecast), in
+  lists, tsibble key groups, covariates and masks, and the backtest.

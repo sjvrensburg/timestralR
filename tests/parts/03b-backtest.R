@@ -173,3 +173,16 @@ stopifnot(.reused(m_w) - r0 - .cost(102) == 2 * ll70)
 m_b <- .fresh()
 invisible(timestral_backtest(m_b, y_kv, h = 40, origins = c(70, 85, 102)))
 stopifnot(.reused(m_b) - (.cost(70) + .cost(85) + .cost(102)) == 2 * ll70)
+
+## unequal-length batches: origins index the end-aligned (padded) series
+bt_u <- timestral_backtest(m, list(a = ua, b = ub), h = 10, origins = c(100, 130))
+bt_ub <- timestral_backtest(m, ub, h = 10, origins = c(40, 70))
+stopifnot(max(abs(bt_u$crps[bt_u$series == "b"] - bt_ub$crps)) < 1e-10,
+          identical(bt_u$t[bt_u$series == "b"], bt_ub$t + 60L))
+.expect_error(timestral_backtest(m, list(ua, ub), h = 10, origins = 50),
+              "series 2 of y has no observed value up to origin 50")
+bt_upc <- timestral_backtest(m, list(ua, ub), h = 10, origins = 130,
+                             past_covariates = list(pc_a, pc_b))
+stopifnot(max(abs(bt_upc$crps[bt_upc$series == "S2"] -
+                  timestral_backtest(m, ub, h = 10, origins = 70,
+                                     past_covariates = pc_b)$crps)) < 1e-10)

@@ -12,7 +12,8 @@
 
 ## Split a tsibble into per-key-group matrices (time in rows, ordered by
 ## the index). Returns list(index, index_var, groups, meas, snames, keyed);
-## every group must share the same time index. Logical measured variables
+## groups must end at the same time, and shorter ones are left-padded with
+## NA rows. Logical measured variables
 ## are accepted only when allow_logical (observation masks).
 .tsibble_groups <- function(x, allow_logical = FALSE) {
   if (!requireNamespace("tsibble", quietly = TRUE))
@@ -32,16 +33,11 @@
   kd <- tsibble::key_data(x)
   keys <- tsibble::key_vars(x)
   rows_list <- kd[[".rows"]]
-  index1 <- NULL; groups <- list(); snames <- character(length(rows_list))
+  groups <- list(); idxs <- list(); snames <- character(length(rows_list))
   for (i in seq_along(rows_list)) {
     rows <- rows_list[[i]]
     rows <- rows[order(df[rows, iv])]
-    idx <- df[rows, iv]
-    if (is.null(index1)) {
-      index1 <- idx
-    } else if (!isTRUE(all.equal(idx, index1))) {
-      stop("all tsibble key groups must share the same time index")
-    }
+    idxs[[i]] <- df[rows, iv]
     groups[[i]] <- as.matrix(df[rows, meas, drop = FALSE])
     snames[i] <- if (length(keys)) {
       paste(vapply(keys, function(k) as.character(kd[[k]][i]), character(1)),
@@ -50,8 +46,23 @@
       paste0("S", i)
     }
   }
+  ## groups may start at different times but must end together: shorter
+  ## ones are left-padded with NA rows onto the longest group's index
+  lens <- vapply(idxs, length, integer(1))
+  index1 <- if (length(idxs)) idxs[[which.max(lens)]]
+  for (i in seq_along(groups)) {
+    tail_idx <- index1[length(index1) - lens[i] + seq_len(lens[i])]
+    if (!isTRUE(all.equal(idxs[[i]], tail_idx)))
+      stop("all tsibble key groups must end at the same time, on the same ",
+           "time index (they may start at different times)")
+    if (lens[i] < length(index1))
+      groups[[i]] <- rbind(matrix(NA, length(index1) - lens[i], ncol(groups[[i]]),
+                                  dimnames = list(NULL, colnames(groups[[i]]))),
+                           groups[[i]])
+  }
   list(index = index1, index_var = iv, groups = groups, meas = meas,
-       snames = snames, keyed = length(keys) > 0L)
+       snames = snames, keyed = length(keys) > 0L,
+       pad = length(index1) - lens)
 }
 
 ## .as_batch equivalent for a tsibble: keys become the batch, measured
@@ -65,7 +76,8 @@
   for (b in seq_along(mats)) arr[, , b] <- mats[[b]]
   list(arr = aperm(arr, c(3, 2, 1)), vnames = gr$meas, tsp = NULL,
        index = gr$index, index_var = gr$index_var, T = nrow(mats[[1]]),
-       V = length(gr$meas), B = length(mats), snames = gr$snames)
+       V = length(gr$meas), B = length(mats), snames = gr$snames,
+       pad = gr$pad)
 }
 
 .batch_dispatch <- function(y, allow_logical = FALSE) {

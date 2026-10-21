@@ -234,3 +234,44 @@ stopifnot(identical(timestral_forecast(m_ka, AirPassengers, h = 6,
 ## a literal level and timestral_levels()' seq() value pick the same knot
 stopifnot(identical(timestral_quantile(fc, 0.15),
                     timestral_quantile(fc, timestral_levels()[4])))
+
+## unequal-length batches: shorter series are left-padded with NA and end
+## at the forecast origin; padding leaves each series' forecast unchanged
+set.seed(11)
+ua <- cumsum(rnorm(150)) + 30; ub <- cumsum(rnorm(90)) + 10
+fc_u <- timestral_forecast(m, list(a = ua, b = ub), h = 20)
+stopifnot(identical(dim(fc_u$quantiles)[c(1, 3)], c(2L, 20L)),
+          all(is.na(fc_u$observed["b", 1, 1:60])),
+          max(abs(fc_u$quantiles["b", , , ] -
+                  timestral_forecast(m, ub, h = 20)$quantiles[1, , ])) < 1e-10,
+          max(abs(fc_u$quantiles["a", , , ] -
+                  timestral_forecast(m, ua, h = 20)$quantiles[1, , ])) < 1e-10)
+## ts with a common end keep the longest's time base; otherwise none
+ts_a <- ts(ua, end = c(2020, 12), frequency = 12)
+ts_b <- ts(ub, end = c(2020, 12), frequency = 12)
+stopifnot(identical(timestral_forecast(m, list(ts_a, ts_b), h = 6)$tsp,
+                    tsp(ts_a)),
+          is.null(timestral_forecast(m, list(ts_a, ts(ub, end = c(2020, 11),
+                                                      frequency = 12)),
+                                     h = 6)$tsp))
+## covariates and masks at a series' own length are padded like it
+pc_a <- matrix(sin(seq_along(ua)), ncol = 1); pc_b <- matrix(cos(seq_along(ub)), ncol = 1)
+fc_pc <- timestral_forecast(m, list(ua, ub), h = 8, past_covariates = list(pc_a, pc_b))
+fc_pc_full <- timestral_forecast(m, list(ua, ub), h = 8,
+                                 past_covariates = list(pc_a, rbind(matrix(NA, 60, 1), pc_b)))
+stopifnot(max(abs(fc_pc$quantiles - fc_pc_full$quantiles)) < 1e-10,
+          max(abs(fc_pc$quantiles[2, , , ] -
+                  timestral_forecast(m, ub, h = 8, past_covariates = pc_b)$quantiles[1, , ])) < 1e-10)
+kc_b <- matrix(seq_len(90 + 8) %% 3, ncol = 1)
+fc_kc <- timestral_forecast(m, list(ua, ub), h = 8,
+                            known_covariates = list(matrix(seq_len(158) %% 3, ncol = 1), kc_b))
+stopifnot(max(abs(fc_kc$quantiles[2, , , ] -
+                  timestral_forecast(m, ub, h = 8, known_covariates = kc_b)$quantiles[1, , ])) < 1e-10)
+.expect_error(timestral_forecast(m, list(ua, ub), h = 8,
+                                 past_covariates = list(pc_a, pc_b[1:50, , drop = FALSE])),
+              "for series 2, or 150 padded like y, got 50")
+msk_b <- rep(TRUE, 90); msk_b[85:90] <- FALSE
+stopifnot(max(abs(timestral_forecast(m, list(ua, ub), h = 8,
+                                     observation_mask = list(rep(TRUE, 150), msk_b))$quantiles[2, , , ] -
+                  timestral_forecast(m, ub, h = 8, observation_mask = msk_b)$quantiles[1, , ])) < 1e-10)
+.expect_error(timestral_forecast(m, list(ua, cbind(ub, ub)), h = 8), "same variate count")

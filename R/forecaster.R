@@ -349,21 +349,30 @@
     })
     Ts <- unname(vapply(parts, nrow, integer(1)))
     Vs <- unname(vapply(parts, ncol, integer(1)))
-    if (length(unique(Ts)) != 1L || length(unique(Vs)) != 1L)
-      stop("all series in a batch must have the same length and variate count")
-    arr <- array(0, c(Ts[1], Vs[1], length(parts)))
-    for (b in seq_along(parts)) arr[, , b] <- parts[[b]]
-    ## a time index (and ts attributes) shared by every series is kept
-    shared <- function(get) {
-      vals <- lapply(y, get)
-      if (is.null(vals[[1]]) ||
-          !all(vapply(vals, identical, logical(1), vals[[1]]))) NULL
-      else vals[[1]]
-    }
+    if (length(unique(Vs)) != 1L)
+      stop("all series in a batch must have the same variate count")
+    ## shorter series are left-padded with NA (missing), so every series
+    ## ends at the forecast origin; padding does not change a forecast
+    Tm <- max(Ts)
+    arr <- array(NA_real_, c(Tm, Vs[1], length(parts)))
+    for (b in seq_along(parts)) arr[Tm - Ts[b] + seq_len(Ts[b]), , b] <- parts[[b]]
+    ## the time base of the longest series is kept when every series'
+    ## time base is its tail (ts: same frequency and end)
+    lon <- which.max(Ts)
+    tsps <- lapply(y, function(e) if (stats::is.ts(e)) stats::tsp(e))
+    tsp <- tsps[[lon]]
+    if (!is.null(tsp) && !all(vapply(tsps, function(t)
+      !is.null(t) && isTRUE(all.equal(t[2:3], tsp[2:3])), logical(1))))
+      tsp <- NULL
+    idxs <- lapply(y, function(e) .strip_time_index(e)$index)
+    index <- idxs[[lon]]
+    if (!is.null(index) && !all(vapply(seq_along(idxs), function(b)
+      !is.null(idxs[[b]]) && length(idxs[[b]]) == Ts[b] &&
+        identical(idxs[[b]], index[Tm - Ts[b] + seq_len(Ts[b])]), logical(1))))
+      index <- NULL
     return(list(arr = aperm(arr, c(3, 2, 1)), vnames = colnames(parts[[1]]),
-                tsp = shared(function(e) if (stats::is.ts(e)) stats::tsp(e)),
-                index = shared(function(e) .strip_time_index(e)$index),
-                T = Ts[1], V = Vs[1], B = length(parts), snames = names(y)))
+                tsp = tsp, index = index, T = Tm, V = Vs[1], B = length(parts),
+                snames = names(y), pad = Tm - Ts))
   }
   if (is.array(y) && length(dim(y)) == 3L) {
     .check_numeric_input(y, "y", allow_logical)
@@ -391,7 +400,7 @@
 ## vector/matrix (time in rows) for B=1, 3-D array (time, covariate, series),
 ## or a list of per-series matrices.
 .as_cov_batch <- function(x, B, expected_len, name, categorical = FALSE,
-                          snames = NULL) {
+                          snames = NULL, pad = NULL) {
   if (is.null(x)) return(NULL)
   cov_index <- NULL
   if (inherits(x, "tbl_ts")) {
@@ -411,28 +420,38 @@
     x <- mats
     cov_index <- gr$index
   }
-  one <- function(elt) {
+  ## pad[b]: NA steps y's series b was left-padded with; its covariates may
+  ## have the series' own length and are padded to match
+  if (is.null(pad)) pad <- integer(B)
+  one <- function(elt, b) {
     st <- .strip_time_index(elt)
-    if (is.null(cov_index) && !is.null(st$index)) cov_index <<- st$index
     elt <- st$values
     if (is.null(elt))
       stop(name, " must have ", expected_len, " rows (time in rows), got NULL")
     .check_numeric_input(elt, name)
     m <- if (is.null(dim(elt))) matrix(as.numeric(elt), ncol = 1) else as.matrix(elt)
     storage.mode(m) <- "double"
-    if (nrow(m) != expected_len)
-      stop(name, " must have ", expected_len, " rows (time in rows), got ", nrow(m))
+    if (pad[b] > 0L && nrow(m) == expected_len - pad[b]) {
+      m <- rbind(matrix(NA_real_, pad[b], ncol(m)), m)
+    } else if (nrow(m) != expected_len) {
+      stop(name, " must have ", expected_len - pad[b], " rows (time in rows)",
+           if (pad[b] > 0L) paste0(" for series ", b, ", or ", expected_len,
+                                   " padded like y"),
+           ", got ", nrow(m))
+    } else if (is.null(cov_index) && !is.null(st$index)) {
+      cov_index <<- st$index
+    }
     t(m)
   }
   out <- if (is.list(x) && !is.data.frame(x)) {
     if (length(x) != B) stop(name, " list must have one entry per series (", B, ")")
-    lapply(x, one)
+    lapply(seq_len(B), function(b) one(x[[b]], b))
   } else if (is.array(x) && length(dim(x)) == 3L) {
     if (dim(x)[3] != B) stop(name, " must have ", B, " series, got ", dim(x)[3])
-    lapply(seq_len(B), function(b) one(x[, , b]))
+    lapply(seq_len(B), function(b) one(x[, , b], b))
   } else {
     if (B != 1L) stop(name, " must be a list or 3-D array for a batch of ", B)
-    list(one(x))
+    list(one(x, 1L))
   }
   Cs <- vapply(out, nrow, integer(1))
   if (length(unique(Cs)) != 1L)
@@ -476,8 +495,12 @@
 #'   forecast variates), matrix
 #'   or data frame with time in rows and one column per target variate, a 3-D
 #'   array (time, variate, series), or a list of per-series vectors/matrices
-#'   (NA = missing; a time index shared by every series in the list is
-#'   kept). Variates of a series are forecast jointly; series in a
+#'   (NA = missing). The series of a list (or the key groups of a tsibble)
+#'   may differ in length: they are taken to end at the same time, the
+#'   forecast origin, and shorter ones are left-padded with missing values,
+#'   which does not change their forecasts. A list keeps the longest
+#'   series' time index when every other series' index is its tail (for
+#'   `ts`, the same frequency and end). Variates of a series are forecast jointly; series in a
 #'   batch are forecast independently in one call. Covariates may also be
 #'   `ts`/`zoo`/`xts` or `tsibble`; when both `y` and a covariate carry a
 #'   time index, the covariate index must align with the context (and
@@ -490,7 +513,9 @@
 #'   `y`, a tsibble with logical measured variables); FALSE or NA marks
 #'   additional missing values
 #' @param past_covariates known over the context only (T time rows, or the
-#'   batch forms described for `y`)
+#'   batch forms described for `y`; in a batch of unequal lengths, a
+#'   shorter series' covariates may have its own length, and are padded
+#'   like it)
 #' @param known_covariates known over context and horizon (T + h time rows)
 #' @param categorical_past_covariates category codes known over the context
 #'   only; target-encoded per series (used as-is when a series has several
@@ -557,7 +582,7 @@ timestral_forecast <- function(model, y, h, observation_mask = NULL,
   inputs[!mask] <- 0
   cfg <- model$config
   get_cov <- function(x, len, nm, cat = FALSE) {
-    out <- .as_cov_batch(x, tg$B, len, nm, cat, tg$snames)
+    out <- .as_cov_batch(x, tg$B, len, nm, cat, tg$snames, tg$pad)
     if (!is.null(out) && !timestral_supports_covariates(model))
       stop("this checkpoint was not trained with covariates; got ", nm)
     idx <- attr(out, "index")

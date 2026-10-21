@@ -44,7 +44,8 @@ head(as_forecast_df(fc))                     # tidy long format (with time colum
 
 Inputs can be numeric vectors, `ts`/`mts`, `zoo`/`xts` (the time index
 is kept), matrices or data frames with time in rows, or a list of series
-forecast as a batch. Columns of a series are forecast jointly; `NA`
+forecast as a batch (series may differ in length; they are aligned at
+the end). Columns of a series are forecast jointly; `NA`
 marks missing values, and `observation_mask` can mark more.
 
 ```r
