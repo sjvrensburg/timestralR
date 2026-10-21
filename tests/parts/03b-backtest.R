@@ -125,3 +125,51 @@ stopifnot(identical(sc_f$cover80, sc40$cover80), "cover98" %in% names(sc_f))
 y_late <- y; y_late[1:20] <- NA
 .expect_error(timestral_backtest(m, list(y, y_late), h = 6, origins = c(10, 40)),
               "series 2 of y has no observed value up to origin 10; start the origins at 21")
+
+## K/V cache across origins: origins congruent modulo patch_size reuse
+## the shared leading patches (forward and mirrored passes each keep an
+## entry); results match cold-cache forecasts and the R backend
+set.seed(7)
+y_kv <- cbind(cumsum(rnorm(260)) + 40, cumsum(rnorm(260)) + 60)
+org_kv <- c(70, 86, 94, 118, 150, 166)   # 16 apart, plus one class of 94
+bt_kv <- timestral_backtest(m, y_kv, h = 40, origins = org_kv,
+                            keep_forecasts = TRUE)
+stopifnot(identical(unique(bt_kv$origin), as.integer(org_kv)))
+for (i in seq_along(org_kv)) {
+  cold <- timestral_forecast(timestral_load(tiny, max_context = 4096L),
+                             y_kv[seq_len(org_kv[i]), ], h = 40)
+  stopifnot(max(abs(cold$quantiles -
+                    attr(bt_kv, "forecasts")[[i]]$quantiles)) < 1e-10)
+}
+r_kv <- timestral_forecast(m_R, y_kv[seq_len(166), ], h = 40)
+stopifnot(max(abs(r_kv$quantiles - attr(bt_kv, "forecasts")[[6]]$quantiles)) < 1e-10)
+## a shorter context sharing a prefix of the cached one, and a third
+## sequence evicting an entry, both stay exact
+m_kv <- timestral_load(tiny, max_context = 4096L)
+for (len in c(200, 120, 136, 260)) {
+  for (yy in list(y_kv[seq_len(len), 1], -y_kv[seq_len(len), 2], y_kv[seq_len(len), 2])) {
+    got <- timestral_forecast(m_kv, yy, h = 20, symmetric = FALSE)
+    ref <- timestral_forecast(timestral_load(tiny, max_context = 4096L), yy,
+                              h = 20, symmetric = FALSE)
+    stopifnot(max(abs(got$quantiles - ref$quantiles)) < 1e-10)
+  }
+}
+
+## the cache is actually used: a forecast after one from a congruent
+## origin reuses that origin's patches in both the forward and mirrored
+## pass, and the backtest's run order makes that happen (70 and 102 are
+## congruent modulo 16, 85 is not and would otherwise evict them)
+.reused <- function(mod) timestralR:::.ts_cache_stats(mod$session)$patches_reused
+.fresh <- function() timestral_load(tiny, max_context = 4096L)
+.cost <- function(o) {   # patches a forecast from o reuses on a cold model
+  mf <- .fresh(); timestral_forecast(mf, y_kv[seq_len(o), ], h = 40); .reused(mf)
+}
+ll70 <- ceiling(70 / m$config$patch_size)
+m_w <- .fresh()
+invisible(timestral_forecast(m_w, y_kv[seq_len(70), ], h = 40))
+r0 <- .reused(m_w)
+invisible(timestral_forecast(m_w, y_kv[seq_len(102), ], h = 40))
+stopifnot(.reused(m_w) - r0 - .cost(102) == 2 * ll70)
+m_b <- .fresh()
+invisible(timestral_backtest(m_b, y_kv, h = 40, origins = c(70, 85, 102)))
+stopifnot(.reused(m_b) - (.cost(70) + .cost(85) + .cost(102)) == 2 * ll70)

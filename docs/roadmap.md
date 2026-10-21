@@ -66,11 +66,13 @@ Decisions taken, for reference when extending them:
 
 ## Follow-ups (not scheduled)
 
-- **K/V cache across origins:** origins run in increasing order, but the
-  mirrored pass (`symmetric = TRUE`) and `max_context` truncation break
-  the prefix match, so the cache rarely helps. Running all origins'
-  forward passes before the mirrored ones would need restructuring
-  `timestral_forecast()`.
+- ~~**K/V cache across origins**~~ (done): the native cache keeps two
+  entries (forward and mirrored) and reuses the longest shared run of
+  leading patches, and the backtest runs origins grouped by
+  `origin %% patch_size`, so origins a multiple of the patch size apart
+  reuse each other's context (12 origins at step 32 on 28M: 1.30 to
+  0.63 s). Not covered: covariate forecasts (the window path has no
+  cache) and contexts past `max_context` (RoPE positions shift).
 - **Scaled scores:** MASE or scaled CRPS need a baseline (seasonal naive)
   and a seasonal period.
 - **Unequal-length batches:** a list `y` must have equal-length series,

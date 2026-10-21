@@ -271,3 +271,13 @@ NumericVector ts_predict_block(SEXP session, NumericMatrix inputs, LogicalMatrix
         out[r + R * (st + steps * q)] = preds[r](st, q);
   return out;
 }
+
+// K/V cache counters of a session: context-only calls that used the
+// cache, how many of them reused patches, and the reused patch total.
+// [[Rcpp::export(.ts_cache_stats)]]
+List ts_cache_stats(SEXP session) {
+  XPtr<Session> sess(session);
+  if (!sess) stop("invalid or released Timestral session");
+  return List::create(_["calls"] = sess->cache_calls, _["hits"] = sess->cache_hits,
+                      _["patches_reused"] = sess->cache_patches_reused);
+}

@@ -67,6 +67,20 @@ each origin.
 For tsibble data, use \code{tsibble::stretch_tsibble()} with the
 \code{\link[=TIMESTRAL]{TIMESTRAL()}} fable model and \code{fabletools::accuracy()} instead.
 }
+\section{Speed}{
+
+With the native backend, a forecast reuses the work done on the leading
+patches its context shares with an earlier origin's context (a K/V
+cache; results are unchanged up to rounding, about \code{1e-13}). Contexts
+are left-padded to whole patches, so two origins share patches only
+when they differ by a multiple of the patch size
+(\code{m$config$patch_size}, 32 for the official checkpoints): a \code{step} that
+is a multiple of it (or \code{origins} that mostly are) roughly halves the
+time on long series. The cache is not used when covariates are given
+(an \code{observation_mask} is fine), nor once a context is longer than the
+model's \code{max_context}, which slides the window.
+}
+
 \section{Parallel use}{
 
 The backtest is single-threaded, like the rest of the package. To run

@@ -38,17 +38,25 @@ here), below that Eigen's own kernels are used. The threshold was tuned
 by benchmark (5e5 was slower on 209M, 2e7 a wash) — a tuned BLAS is not
 always better, particularly on the many medium products in attention.
 
-The context-only path keeps a single-entry K/V cache in the session
-(`KVCache` in `src/session.h`, used by `src/predict.cpp`): when a `.ts_predict_block` call's
-context extends the cached context bit-for-bit (same rows, groups, and
-first-observed patches), earlier patches' per-layer K/V are reused and
-only appended patches plus decode tokens are computed. This is exact
-(causal masks/scaler, positions depend only on the first observed patch);
-multi-block native vs R agreement on 209M is ~4e-13. It cannot help once
-the decode loop truncates the context at `max_context`: positions are
-relative to the context start, so a sliding window invalidates cached K.
-Cache memory is capped at 256 MB (estimated); above that the call falls
-back to a full compute.
+The context-only path keeps a two-entry K/V cache in the session
+(`KVCache` in `src/session.h`, used by `src/predict.cpp`): a
+`.ts_predict_block` call reuses the entry whose context shares the most
+leading patches with its own, bit-for-bit (same rows, groups, and
+first-observed patches); those patches' per-layer K/V are reused and only
+the remaining patches plus decode tokens are computed. On no match the
+least recently used entry is rebuilt. This is exact (causal masks/scaler,
+positions depend only on the first observed patch); multi-block native
+vs R agreement on 209M is ~4e-13. Two entries keep the forward and
+mirrored passes of a symmetric forecast from evicting each other, and
+prefix (not extension) matching lets a backtest origin reuse an earlier
+origin's context although that entry ends in median feedback. Origins
+share patches only when congruent modulo `patch_size` (left padding), so
+`timestral_backtest()` runs them grouped by `origin %% patch_size`. It
+cannot help once the decode loop truncates the context at `max_context`:
+positions are relative to the context start, so a sliding window
+invalidates cached K. Cache memory is capped at 256 MB (estimated) over
+both entries; a new entry drops the other if they would exceed it, and a
+call above the cap on its own falls back to a full compute.
 
 Speed milestones on the `native-speedups` branch (each profiled on
 209M after landing; single-threaded throughout, per the constraint

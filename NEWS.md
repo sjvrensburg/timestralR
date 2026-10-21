@@ -8,7 +8,16 @@
   median, pinball loss averaged over the levels, CRPS approximated from
   the quantiles (trapezoidal over the knots), and interval coverage. Both
   are single-threaded; `?timestral_backtest` shows how to split origins
-  across parallel workers.
+  across parallel workers. With the native backend, origins that differ
+  by a multiple of the patch size (32 for the official checkpoints) reuse
+  the K/V cache over the context they share, which roughly halves a
+  long-series backtest with such a `step` (1.30 to 0.63 s for 12 origins
+  on 28M).
+
+- The native K/V cache keeps two entries (the forward and mirrored passes
+  of a symmetric forecast no longer evict each other) and reuses the
+  longest run of leading patches a context shares with a cached one,
+  rather than only an exact extension of it.
 
 - `timestral_supports_covariates()` and
   `timestral_supports_known_covariates()` report which covariates a
