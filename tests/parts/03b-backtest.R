@@ -99,3 +99,29 @@ stopifnot(max(abs(bt_m$median - timestral_score(fc_m, y[41:46])$median)) < 1e-10
 .expect_error(timestral_backtest(m, y, h = 6, step = 0), "step must")
 .expect_error(timestral_backtest(m, y[1:5], h = 6), "too few")
 .expect_error(timestral_backtest(m, y, h = 6, bogus = 1), "unsupported argument")
+
+## review fixes: NULL arguments are no-ops, covariates are validated by
+## timestral_forecast()'s parser, masked actuals are not scored, series
+## keep their names, fractional levels, and early origins fail up front
+bt_null <- timestral_backtest(m, y, h = 6, origins = 40, past_covariates = NULL,
+                              known_covariates = NULL)
+stopifnot(max(abs(bt_null$median - bt$median[1:6])) < 1e-10)
+.expect_error(timestral_backtest(m, y, h = 6, origins = 40,
+                                 categorical_past_covariates = factor(y > 50)),
+              "factor")
+msk2 <- rep(TRUE, length(y)); msk2[42:43] <- FALSE
+bt_m2 <- timestral_backtest(m, y, h = 6, origins = 40, observation_mask = msk2)
+stopifnot(identical(is.na(bt_m2$actual), c(FALSE, TRUE, TRUE, FALSE, FALSE, FALSE)),
+          identical(is.na(bt_m2$crps), is.na(bt_m2$actual)))
+stopifnot(identical(unique(timestral_backtest(m, list(a = y), h = 4,
+                                              origins = 50)$series), "a"),
+          identical(unique(timestral_backtest(m, y, h = 4, origins = 50)$series), "S1"),
+          identical(unique(timestral_backtest(m, list(y, y), h = 4,
+                                              origins = 50)$series), c("S1", "S2")))
+sc_f <- timestral_score(fc40, y[41:46], level = c(0.8, 0.98))
+stopifnot(identical(sc_f$cover80, sc40$cover80), "cover98" %in% names(sc_f))
+.expect_error(timestral_score(fc40, y[41:46], level = 95),
+              "for the 95% interval")
+y_late <- y; y_late[1:20] <- NA
+.expect_error(timestral_backtest(m, list(y, y_late), h = 6, origins = c(10, 40)),
+              "series 2 of y has no observed value up to origin 10; start the origins at 21")

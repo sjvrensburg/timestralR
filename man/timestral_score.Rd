@@ -14,7 +14,8 @@ forecast input with \code{h} time steps: a vector or \code{ts} (one series, one
 variate), a matrix with time in rows (one series), a 3-D array
 (time, variate, series), or a list of those per series}
 
-\item{level}{interval levels in percent for the coverage columns}
+\item{level}{interval levels in percent for the coverage columns
+(fractions in (0, 1) are taken as percentages)}
 }
 \value{
 A data frame with columns \code{series}, \code{variate}, \code{step},

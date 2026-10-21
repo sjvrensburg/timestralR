@@ -702,9 +702,9 @@ the section 2 backtest, scored:
 sc <- timestral_score(fc_bt, test)
 head(sc, 3)
 #>   series variate step actual median pinball   crps     ae cover80 cover98
-#> 1      1      V1    1    340  346.2    3.67  3.808  6.178    TRUE    TRUE
-#> 2      1      V1    2    318  334.0   10.13 10.583 15.986   FALSE    TRUE
-#> 3      1      V1    3    362  384.0   14.83 15.501 22.045   FALSE    TRUE
+#> 1     S1      V1    1    340  346.2    3.67  3.808  6.178    TRUE    TRUE
+#> 2     S1      V1    2    318  334.0   10.13 10.583 15.986   FALSE    TRUE
+#> 3     S1      V1    3    362  384.0   14.83 15.501 22.045   FALSE    TRUE
 colMeans(sc[, c("ae", "pinball", "crps", "cover80", "cover98")])
 #>      ae pinball    crps cover80 cover98 
 #> 14.5363 10.6317 11.0107  0.8333  1.0000
@@ -802,7 +802,7 @@ timing <- function(model) median(replicate(3, system.time(
   timestral_forecast(model, AirPassengers, h = 36))[["elapsed"]]))
 c(native = timing(m), R = timing(m_R))
 #> native      R 
-#>  0.059  0.092
+#>  0.059  0.091
 ```
 
 ### Parallel use

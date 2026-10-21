@@ -4,21 +4,26 @@
 ## constraint in docs/developer-notes.md); users parallelise across
 ## origins at the R level.
 
-## Validate interval levels (percent) against the forecast's knots and
-## return the knot indices of each interval's lower and upper bound.
+## Validate central-interval levels against the forecast's knots: percent,
+## or fractions in (0, 1) as in the forecast package. Returns the levels
+## (percent, sorted) and the knot indices of each interval's bounds. Shared
+## by timestral_score() and timestral_as_forecast().
 .interval_knots <- function(levels, level) {
-  if (!is.numeric(level) || any(!is.finite(level)) ||
+  if (!is.numeric(level) || !length(level) || any(!is.finite(level)) ||
       any(level <= 0 | level >= 100))
     stop("level must hold interval levels in percent, between 0 and 100")
-  knot <- function(p) {
+  if (max(level) < 1) level <- 100 * level
+  level <- sort(unique(level))
+  knot <- function(p, L) {
     i <- which(abs(levels - p) < 1e-9)
     if (length(i) != 1L)
-      stop("no quantile knot at level ", p, " for the ", round(100 * (1 - 2 * p)),
-           "% interval; available levels are in the forecast's $levels")
+      stop("no quantile knot at level ", p, " for the ", L, "% interval; ",
+           "available levels are in the forecast's $levels")
     i
   }
-  list(lo = vapply(level, function(L) knot((1 - L / 100) / 2), integer(1)),
-       hi = vapply(level, function(L) knot((1 + L / 100) / 2), integer(1)))
+  list(level = level,
+       lo = vapply(level, function(L) knot((1 - L / 100) / 2, L), integer(1)),
+       hi = vapply(level, function(L) knot((1 + L / 100) / 2, L), integer(1)))
 }
 
 ## Trapezoidal weights of the knots for integrating over (tau_1, tau_K).
@@ -62,6 +67,7 @@
 #'   variate), a matrix with time in rows (one series), a 3-D array
 #'   (time, variate, series), or a list of those per series
 #' @param level interval levels in percent for the coverage columns
+#'   (fractions in (0, 1) are taken as percentages)
 #' @return A data frame with columns `series`, `variate`, `step`,
 #'   `actual`, `median`, `pinball`, `crps`, `ae` and one `cover<L>`
 #'   column per level.
@@ -88,6 +94,7 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
   tau <- fc$levels
   K <- length(tau)
   ik <- .interval_knots(tau, level)
+  level <- ik$level
   med <- which(abs(tau - 0.5) < 1e-9)
   y <- act$arr
   yk <- array(y, c(d[1:3], K))
@@ -97,8 +104,9 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
   ## weighted sums over the level dimension (the last, so a matrix product)
   sum_k <- function(wt) array(matrix(rho, ncol = K) %*% wt, d[1:3])
   level_k <- function(k) array(q[, , , k], d[1:3])
+  ## series labels as timestral_forecast() names a batch ("S1", ...)
   snames <- dimnames(q)[[1L]]
-  if (is.null(snames)) snames <- if (d[1] == 1L) "1" else as.character(seq_len(d[1]))
+  if (is.null(snames)) snames <- paste0("S", seq_len(d[1]))
   vnames <- dimnames(q)[[2L]]
   if (is.null(vnames)) vnames <- paste0("V", seq_len(d[2]))
   ## rows: step fastest, then variate, then series
@@ -120,25 +128,19 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
   out
 }
 
-## Per-series covariates as a list of matrices with time in rows, from the
-## forms timestral_forecast() accepts (vector/matrix for one series, a
-## 3-D array (time, covariate, series), or a list per series).
-.cov_list <- function(x, B, name) {
+## Per-series covariates as a list of matrices with time in rows, parsed
+## and validated by timestral_forecast()'s own parser at their full length.
+.cov_list <- function(x, B, name, snames) {
   if (inherits(x, "tbl_ts"))
     stop("timestral_backtest() does not take tsibble covariates; see ",
          "?timestral_backtest for tsibble data")
-  as_mat <- function(e) {
-    e <- .strip_time_index(e)$values
-    if (is.null(dim(e))) matrix(as.numeric(e), ncol = 1) else as.matrix(e)
-  }
-  out <- if (is.list(x) && !is.data.frame(x)) lapply(x, as_mat)
-    else if (is.array(x) && length(dim(x)) == 3L)
-      lapply(seq_len(dim(x)[3]), function(b) x[, , b, drop = TRUE] |>
-               matrix(nrow = dim(x)[1]))
-    else list(as_mat(x))
-  if (length(out) != B)
-    stop(name, " must hold covariates for each of the ", B, " series")
-  out
+  first <- if (is.list(x) && !is.data.frame(x)) x[[1L]] else x
+  len <- if (is.array(x) && length(dim(x)) == 3L) dim(x)[1]
+    else NROW(.strip_time_index(first)$values)
+  parsed <- .as_cov_batch(x, B, len, name,
+                          categorical = grepl("^categorical", name),
+                          snames = snames)
+  lapply(parsed, t)
 }
 
 #' Rolling-origin backtest of a Timestral model
@@ -154,7 +156,9 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' (fewer if the series is short). Covariates and `observation_mask` in
 #' `...` are given over the whole series and cut to each origin:
 #' past-only covariates and the mask to `1:o`, known-future covariates to
-#' `1:(o + h)`, so known covariates need at least `T` rows. Forecasts are
+#' `1:(o + h)`, so known covariates need at least `T` rows. Steps the
+#' mask marks as missing are not scored either (their scores are `NA`).
+#' Forecasts are
 #' made one origin at a time, batching the series of a list `y` within
 #' each origin.
 #'
@@ -217,6 +221,7 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
          "tsibble::stretch_tsibble() with the TIMESTRAL() fable model")
   h <- .validate_horizon(h)
   args <- list(...)
+  args <- args[!vapply(args, is.null, logical(1))]
   allowed <- c("observation_mask", "past_covariates", "known_covariates",
                "categorical_past_covariates", "categorical_known_covariates",
                "symmetric", "clip_nonnegative")
@@ -261,8 +266,10 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   }
   past_names <- c("past_covariates", "categorical_past_covariates")
   known_names <- c("known_covariates", "categorical_known_covariates")
-  covs <- lapply(args[intersect(names(args), c(past_names, known_names))],
-                 .cov_list, B = tg$B, name = "covariates")
+  cov_names <- intersect(names(args), c(past_names, known_names))
+  covs <- stats::setNames(lapply(cov_names, function(nm)
+    .cov_list(args[[nm]], tg$B, nm, tg$snames)), cov_names)
+  covs <- covs[lengths(covs) > 0L]   # zero-column covariates: none
   for (nm in names(covs)) {
     need <- if (nm %in% known_names) max(origins) + h else max(origins)
     rows <- vapply(covs[[nm]], nrow, integer(1))
@@ -272,6 +279,25 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
            if (nm %in% known_names) " (context plus horizon)")
   }
   opts <- args[intersect(names(args), c("symmetric", "clip_nonnegative"))]
+  ## check every origin up front, so no completed work is lost to a late
+  ## failure: each series needs an observed value by the first origin
+  observed <- is.finite(arr)
+  if (!is.null(mask)) observed <- observed & mask
+  first_obs <- apply(observed, 1L, function(s) {
+    hit <- which(colSums(matrix(s, ncol = Tn)) > 0)
+    if (length(hit)) hit[1] else NA_integer_
+  })
+  late <- is.na(first_obs) | first_obs > origins[1]
+  if (any(late))
+    stop("series ", paste(if (is.null(tg$snames)) which(late) else tg$snames[late],
+                          collapse = ", "),
+         " of y has no observed value up to origin ", origins[1],
+         "; start the origins at ", max(first_obs, na.rm = TRUE),
+         " or later")
+  ## actuals the mask marks as missing are not scored
+  actual_arr <- arr
+  if (!is.null(mask)) actual_arr[!mask] <- NA_real_
+  slabels <- if (is.null(tg$snames)) paste0("S", seq_len(tg$B)) else tg$snames
 
   time_of <- if (!is.null(tg$tsp)) {
     function(t) tg$tsp[1] + (t - 1) / tg$tsp[3]
@@ -292,8 +318,10 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
     }
     fc <- do.call(timestral_forecast, call_args)
     if (keep_forecasts) forecasts[[i]] <- fc
-    sc <- timestral_score(fc, as_input(arr[, , o + seq_len(h), drop = FALSE]),
+    sc <- timestral_score(fc, as_input(actual_arr[, , o + seq_len(h), drop = FALSE]),
                           level = level)
+    ## a one-series forecast carries no series name; label as the batch
+    sc$series <- rep(slabels, each = nrow(sc) / tg$B)
     tt <- o + sc$step
     front <- data.frame(origin = rep(o, nrow(sc)), series = sc$series,
                         variate = sc$variate, step = sc$step, t = tt,

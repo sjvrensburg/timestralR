@@ -58,7 +58,9 @@ series of length \code{T}. By default the origins are \code{seq(initial, T - h, 
 (fewer if the series is short). Covariates and \code{observation_mask} in
 \code{...} are given over the whole series and cut to each origin:
 past-only covariates and the mask to \code{1:o}, known-future covariates to
-\code{1:(o + h)}, so known covariates need at least \code{T} rows. Forecasts are
+\code{1:(o + h)}, so known covariates need at least \code{T} rows. Steps the
+mask marks as missing are not scored either (their scores are \code{NA}).
+Forecasts are
 made one origin at a time, batching the series of a list \code{y} within
 each origin.
 
