@@ -1,4 +1,4 @@
-# timestralR
+# timestralR <img src="man/figures/logo.png" align="right" height="139" alt="timestralR hex logo" />
 
 Run Mistral AI's Timestral forecasting models from R — no Python, no PyTorch,
 no external runtime. The package downloads the official `safetensors`

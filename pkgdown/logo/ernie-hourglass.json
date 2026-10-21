@@ -1,0 +1,10 @@
+{
+ "prompt": "Retro 8-bit pixel art icon of an hourglass, large chunky square pixels, centred on a solid very dark navy background. The hourglass has a bright sky blue pixel frame and pale light blue glass. Orange sand falls from the top chamber; in the bottom chamber the orange sand forms a rising staircase line chart that widens into a fan of orange, amber and yellow pixels like a forecast band. Limited palette: dark navy, sky blue, pale blue, white, orange, amber, yellow. Flat colours, no gradients, no text, no letters, no numbers",
+ "seed": 303,
+ "steps": 8,
+ "size": "1024x1024",
+ "seconds": 36.7,
+ "load_seconds": 8.0,
+ "model": "baidu/ERNIE-Image-Turbo",
+ "licence": "Apache-2.0"
+}

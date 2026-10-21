@@ -1,0 +1,58 @@
+url: https://sjvrensburg.github.io/timestralR/
+
+# docs/ holds the developer notes, so the site is built elsewhere.
+destination: site
+
+template:
+  bootstrap: 5
+  light-switch: true
+  bslib:
+    primary: "#FA500F"
+    navbar-bg: "#14141F"
+    base_font: {google: "Inter"}
+    heading_font: {google: "Inter"}
+    code_font: {google: "JetBrains Mono"}
+
+navbar:
+  structure:
+    left: [intro, reference, news]
+    right: [search, github, lightswitch]
+
+home:
+  title: "timestralR: Zero-shot probabilistic forecasting with Timestral"
+
+reference:
+- title: Models
+  desc: Download, load and inspect Timestral checkpoints.
+  contents:
+  - timestral_load
+  - timestral_download
+  - timestral_supports_covariates
+- title: Forecasting
+  contents:
+  - timestral_forecast
+  - predict.timestral_model
+  - timestral_median
+  - timestral_quantile
+  - timestral_levels
+- title: Evaluation
+  desc: Score forecasts and run rolling-origin backtests.
+  contents:
+  - timestral_score
+  - timestral_backtest
+- title: Plotting
+  contents:
+  - plot.timestral_forecast
+  - autoplot.timestral_forecast
+- title: Interfaces
+  desc: Conversions and methods for tsibble, fable and the forecast package.
+  contents:
+  - as_forecast_df
+  - as_tsibble.timestral_forecast
+  - TIMESTRAL
+  - as_fable.timestral_forecast
+  - forecast.timestral_model
+  - timestral_as_forecast
+- title: Package
+  contents:
+  - timestralR-package
