@@ -37,6 +37,10 @@ jobs:
 
       # The vignette is precomputed, so building the site needs no checkpoint.
       # _pkgdown.yml sends the site to site/ because docs/ holds the developer notes.
+      # pkgdown renders every top-level .md; keep the agent notes off the site.
+      - name: Drop agent notes
+        run: rm -f AGENTS.md CLAUDE.md
+
       - name: Build site
         run: pkgdown::build_site_github_pages(dest_dir = "site", new_process = FALSE, install = FALSE)
         shell: Rscript {0}
