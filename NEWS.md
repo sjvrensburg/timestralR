@@ -1,5 +1,15 @@
 # timestralR (development version)
 
+- `timestral_backtest()` runs a rolling-origin backtest: it forecasts
+  from a sequence of origins using only the data up to each one (with
+  covariates and the observation mask cut to match), and returns one
+  scored row per origin, series, variate and step. `timestral_score()`
+  scores any forecast against realised values: absolute error of the
+  median, pinball loss averaged over the levels, CRPS approximated from
+  the quantiles (trapezoidal over the knots), and interval coverage. Both
+  are single-threaded; `?timestral_backtest` shows how to split origins
+  across parallel workers.
+
 - `timestral_supports_covariates()` and
   `timestral_supports_known_covariates()` report which covariates a
   checkpoint can condition on (the Python forecaster's

@@ -47,12 +47,8 @@ timestral_as_forecast <- function(fc, level = c(80, 98), series = 1L,
   if (is.null(fc$tsp))
     stop("a forecast-package object needs a ts time base; create the ",
          "forecast from ts input")
-  if (!is.numeric(level) || !length(level) || any(!is.finite(level)) ||
-      any(level <= 0 | level >= 100))
-    stop("level must hold interval levels in percent, between 0 and 100")
-  ## fractions are percentages, as in the forecast package
-  if (max(level) < 1) level <- 100 * level
-  level <- sort(unique(level))
+  ik <- .interval_knots(fc$levels, level)
+  level <- ik$level
   pp <- .fc_plot_parts(fc, series)
   if (is.character(variate)) {
     vi <- match(variate, pp$vnames)
@@ -67,10 +63,8 @@ timestral_as_forecast <- function(fc, level = c(80, 98), series = 1L,
   q <- pp$qmat(vi)
   tsp <- fc$tsp
   fts <- function(v) .future_ts(v, tsp)
-  lo <- vapply(level, function(L) q[, pp$knot((1 - L / 100) / 2)],
-               numeric(fc$h))
-  hi <- vapply(level, function(L) q[, pp$knot((1 + L / 100) / 2)],
-               numeric(fc$h))
+  lo <- matrix(q[, ik$lo], nrow = fc$h)
+  hi <- matrix(q[, ik$hi], nrow = fc$h)
   lo <- matrix(lo, nrow = fc$h, dimnames = list(NULL, paste0(level, "%")))
   hi <- matrix(hi, nrow = fc$h, dimnames = list(NULL, paste0(level, "%")))
   x <- stats::ts(pp$obs[vi, ], start = tsp[1], frequency = tsp[3])
