@@ -572,6 +572,24 @@ ggplot(rbind(data.frame(step = by_step$step, score = "absolute error",
        y = "Mean score (thousands)", colour = NULL)
 ```
 
+The `ae`, `pinball` and `crps` columns are in the units of the series,
+so they cannot be averaged across series of different size. The
+**scaled** columns divide them by the in-sample mean absolute error of
+the seasonal naive forecast over each origin's context,
+mean |y~t~ − y~t−m~|: `mase` (the mean absolute scaled error, once
+averaged), `scaled_pinball` and `scaled_crps`. A value below 1 means the
+forecast beat the typical one-season-back error of the context. The
+period *m* comes from the `ts` frequency (12 here); set `period` for
+input without one, or pass your own `scale` (a number per series, or a
+function of the context). The three UK lung-disease series of section 3
+differ several-fold in size, and on the scaled scores they compare
+directly:
+
+```{r backtest-scaled}
+bt_b <- timestral_backtest(m, batch, h = 12, origins = c(48, 60))
+aggregate(cbind(crps, scaled_crps, mase) ~ series, data = bt_b, FUN = mean)
+```
+
 Covariates and `observation_mask` are passed over the whole series and
 cut to each origin: past-only covariates and the mask to the context,
 known-future covariates to the context plus the horizon. A list of

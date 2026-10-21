@@ -107,6 +107,7 @@ timestral_supports_known_covariates(m)               # can it use known-future c
 bt <- timestral_backtest(m, AirPassengers, h = 12,       # forecast from each origin,
                          origins = seq(72, 132, by = 12)) # score against what followed
 aggregate(cbind(ae, pinball, crps, cover80) ~ step, data = bt, FUN = mean)
+aggregate(cbind(mase, scaled_crps) ~ origin, data = bt, FUN = mean) # scale-free
 timestral_score(fc, actual)                          # score a single forecast
 ```
 

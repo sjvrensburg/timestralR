@@ -13,6 +13,8 @@ timestral_backtest(
   step = h,
   ...,
   level = c(80, 98),
+  period = NULL,
+  scale = NULL,
   keep_forecasts = FALSE
 )
 }
@@ -37,6 +39,11 @@ step); overrides \code{initial} and \code{step}}
 covariates (over the whole series), \code{symmetric}, \code{clip_nonnegative}}
 
 \item{level}{interval levels in percent for the coverage columns}
+
+\item{period, scale}{the scale of the scaled scores, as in
+\code{\link[=timestral_score]{timestral_score()}}; \code{NULL} \code{period} takes the frequency of a \code{ts}
+\code{y}. Each origin is scaled by its own context (a \code{scale} function gets
+the context up to the origin).}
 
 \item{keep_forecasts}{keep each origin's \code{timestral_forecast} in the
 \code{"forecasts"} attribute of the result (a list named by origin)}

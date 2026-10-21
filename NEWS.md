@@ -1,5 +1,16 @@
 # timestralR (development version)
 
+- `timestral_score()` and `timestral_backtest()` add scaled scores that
+  can be averaged across series: `mase`, `scaled_pinball` and
+  `scaled_crps` divide `ae`, `pinball` and `crps` by the in-sample mean
+  absolute error of the seasonal naive forecast over the context (the
+  MASE scale of Hyndman and Koehler, 2006; it matches
+  `forecast::accuracy()`), shown in a new `scale` column. `period`
+  defaults to the `ts` frequency and 1 otherwise; `scale` takes your own
+  numbers or a function of the context. In a backtest each origin is
+  scaled by its own context. A constant context gives `NA` scaled scores
+  and one warning.
+
 - Batches may hold series of unequal length (a list `y`, or tsibble key
   groups that start at different times): series are taken to end at the
   same time and shorter ones are left-padded with missing values, which
