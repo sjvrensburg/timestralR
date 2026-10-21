@@ -46,7 +46,8 @@ This vignette covers the whole interface:
 6. time indexes from `ts`, `zoo` and `xts`;
 7. the tidyverts (`tsibble` input and output, `fable` integration) and
    the forecast package;
-8. options, backends, and using the package in parallel code.
+8. evaluating forecasts: scoring and rolling-origin backtests;
+9. options, backends, and using the package in parallel code.
 
 ```{r packages, message = FALSE}
 library(timestralR)
@@ -522,7 +523,64 @@ autoplot(fo) +
        x = NULL, y = "Passengers (thousands)", colour = NULL)
 ```
 
-## 8. Options, backends and parallel use
+## 8. Evaluating forecasts
+
+`timestral_score()` scores a forecast against the values that were
+later observed, one row per step. Besides the absolute error of the
+median (`ae`) it reports two scores of the whole predictive
+distribution: the pinball (quantile) loss averaged over the 21 levels
+(`pinball`), and an approximation of the continuous ranked probability
+score (`crps`). It also reports whether each step fell inside the 80%
+and 98% intervals. Lower scores are better, and for a point forecast
+both distribution scores reduce to (about) the absolute error. Here is
+the section 2 backtest, scored:
+
+```{r score}
+sc <- timestral_score(fc_bt, test)
+head(sc, 3)
+colMeans(sc[, c("ae", "pinball", "crps", "cover80", "cover98")])
+```
+
+One held-out window says little. `timestral_backtest()` repeats the
+forecast from several *origins*, each time using only the data up to
+the origin, and scores every forecast. Here the origin moves forward a
+year at a time over the last six years of `AirPassengers`, with a
+12-month horizon each time:
+
+```{r backtest-rolling}
+bt <- timestral_backtest(m, AirPassengers, h = 12,
+                         origins = seq(72, 132, by = 12))
+head(bt[, c("origin", "step", "t", "actual", "median", "crps")], 3)
+aggregate(cbind(ae, crps, cover80, cover98) ~ origin, data = bt, FUN = mean)
+```
+
+Averaging by forecast step shows how accuracy falls off with the
+horizon:
+
+```{r backtest-steps, fig.cap = "Mean CRPS and absolute error by forecast step over six yearly origins.", fig.height = 3}
+by_step <- aggregate(cbind(ae, crps) ~ step, data = bt, FUN = mean)
+ggplot(rbind(data.frame(step = by_step$step, score = "absolute error",
+                        value = by_step$ae),
+             data.frame(step = by_step$step, score = "CRPS",
+                        value = by_step$crps)),
+       aes(step, value, colour = score)) +
+  geom_line() + geom_point(size = 1) +
+  scale_x_continuous(breaks = 1:12) +
+  labs(title = "Backtest accuracy by forecast step", x = "Months ahead",
+       y = "Mean score (thousands)", colour = NULL)
+```
+
+Covariates and `observation_mask` are passed over the whole series and
+cut to each origin: past-only covariates and the mask to the context,
+known-future covariates to the context plus the horizon. A list of
+equal-length series is backtested as a batch at each origin. The
+backtest runs one origin after another; to spread origins over cores,
+split them and run one backtest per chunk (see `?timestral_backtest`
+and the next section). For tsibbles, the fable route covers the same
+ground: `tsibble::stretch_tsibble()`, the `TIMESTRAL()` model and
+`accuracy()`.
+
+## 9. Options, backends and parallel use
 
 The main options of `timestral_forecast()`:
 
@@ -565,7 +623,8 @@ The native code is deliberately **single-threaded**: no OpenMP, no
 thread pools, and no changes to BLAS threading. Parallelise at the R
 level instead (`parallel`, `future`, `mirai`, ...), with one model per
 worker. For many series of the same length, batching (section 3) is
-usually the faster option.
+usually the faster option; for a long backtest, split the origins
+between workers.
 
 ```{r parallel, eval = FALSE}
 library(parallel)

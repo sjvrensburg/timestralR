@@ -100,6 +100,15 @@ predict(m, AirPassengers, h = 24)                    # same as timestral_forecas
 timestral_supports_known_covariates(m)               # can it use known-future covariates?
 ```
 
+### Evaluating forecasts
+
+```r
+bt <- timestral_backtest(m, AirPassengers, h = 12,       # forecast from each origin,
+                         origins = seq(72, 132, by = 12)) # score against what followed
+aggregate(cbind(ae, pinball, crps, cover80) ~ step, data = bt, FUN = mean)
+timestral_score(fc, actual)                          # score a single forecast
+```
+
 Intervals are read off the quantile knots without interpolation, so each
 level must pair two knots: the default is 80% and 98%, since the 21
 knots have no 2.5%/97.5% quantiles for 95%.
