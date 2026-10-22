@@ -280,9 +280,11 @@ one column per variate.</p>
 <code><a href="https://ggplot2.tidyverse.org/reference/autoplot.html" class="external-link">autoplot()</a></code> facets by variate.</div>
 </div>
 <p><strong>Batches</strong> are independent series forecast in one call.
-Pass a list of series (or a 3-D array). The series must have the same
-length, and the result gains a leading series dimension. A time index
-shared by every series in the list is kept.</p>
+Pass a list of series (or a 3-D array), and the result gains a leading
+series dimension. The series may differ in length: they are taken to end
+at the same time, and shorter ones are padded at the start with missing
+values, which leaves their forecasts unchanged. The longest series’ time
+index is kept when every other series’ index is its tail.</p>
 <div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">batch</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>total <span class="op">=</span> <span class="va">ldeaths</span>, male <span class="op">=</span> <span class="va">mdeaths</span>, female <span class="op">=</span> <span class="va">fdeaths</span><span class="op">)</span></span>
 <span><span class="va">fc_b</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_forecast.html">timestral_forecast</a></span><span class="op">(</span><span class="va">m</span>, <span class="va">batch</span>, h <span class="op">=</span> <span class="fl">24</span><span class="op">)</span></span>
@@ -718,10 +720,14 @@ better, and for a point forecast both distribution scores reduce to
 <div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sc</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_score.html">timestral_score</a></span><span class="op">(</span><span class="va">fc_bt</span>, <span class="va">test</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">sc</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   series variate step actual median pinball   crps     ae cover80 cover98</span></span>
-<span><span class="co">#&gt; 1     S1      V1    1    340  346.2    3.67  3.808  6.178    TRUE    TRUE</span></span>
-<span><span class="co">#&gt; 2     S1      V1    2    318  334.0   10.13 10.583 15.986   FALSE    TRUE</span></span>
-<span><span class="co">#&gt; 3     S1      V1    3    362  384.0   14.83 15.501 22.045   FALSE    TRUE</span></span>
+<span><span class="co">#&gt;   series variate step actual median pinball   crps     ae scale   mase</span></span>
+<span><span class="co">#&gt; 1     S1      V1    1    340  346.2    3.67  3.808  6.178 30.57 0.2021</span></span>
+<span><span class="co">#&gt; 2     S1      V1    2    318  334.0   10.13 10.583 15.986 30.57 0.5229</span></span>
+<span><span class="co">#&gt; 3     S1      V1    3    362  384.0   14.83 15.501 22.045 30.57 0.7211</span></span>
+<span><span class="co">#&gt;   scaled_pinball scaled_crps cover80 cover98</span></span>
+<span><span class="co">#&gt; 1         0.1201      0.1246    TRUE    TRUE</span></span>
+<span><span class="co">#&gt; 2         0.3315      0.3461   FALSE    TRUE</span></span>
+<span><span class="co">#&gt; 3         0.4850      0.5070   FALSE    TRUE</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/colSums.html" class="external-link">colMeans</a></span><span class="op">(</span><span class="va">sc</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"ae"</span>, <span class="st">"pinball"</span>, <span class="st">"crps"</span>, <span class="st">"cover80"</span>, <span class="st">"cover98"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt;      ae pinball    crps cover80 cover98 </span></span>
 <span><span class="co">#&gt; 14.5363 10.6317 11.0107  0.8333  1.0000</span></span></code></pre></div>
@@ -763,14 +769,36 @@ horizon:</p>
 <img src="figures/timestralR-backtest-steps-1.png" alt="Mean CRPS and absolute error by forecast step over six yearly origins."><div class="figcaption">Mean CRPS and absolute error by forecast step
 over six yearly origins.</div>
 </div>
+<p>The <code>ae</code>, <code>pinball</code> and <code>crps</code>
+columns are in the units of the series, so they cannot be averaged
+across series of different size. The <strong>scaled</strong> columns
+divide them by the in-sample mean absolute error of the seasonal naive
+forecast over each origin’s context, mean |y<sub>t</sub> −
+y<sub>t−m</sub>|: <code>mase</code> (the mean absolute scaled error,
+once averaged), <code>scaled_pinball</code> and
+<code>scaled_crps</code>. A value below 1 means the forecast beat the
+typical one-season-back error of the context. The period <em>m</em>
+comes from the <code>ts</code> frequency (12 here); set
+<code>period</code> for input without one, or pass your own
+<code>scale</code> (a number per series, or a function of the context).
+The three UK lung-disease series of section 3 differ several-fold in
+size, and on the scaled scores they compare directly:</p>
+<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">bt_b</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_backtest.html">timestral_backtest</a></span><span class="op">(</span><span class="va">m</span>, <span class="va">batch</span>, h <span class="op">=</span> <span class="fl">12</span>, origins <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">48</span>, <span class="fl">60</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/stats/aggregate.html" class="external-link">aggregate</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">cbind</a></span><span class="op">(</span><span class="va">crps</span>, <span class="va">scaled_crps</span>, <span class="va">mase</span><span class="op">)</span> <span class="op">~</span> <span class="va">series</span>, data <span class="op">=</span> <span class="va">bt_b</span>, FUN <span class="op">=</span> <span class="va">mean</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   series  crps scaled_crps   mase</span></span>
+<span><span class="co">#&gt; 1 female 25.28      0.3194 0.3833</span></span>
+<span><span class="co">#&gt; 2   male 74.90      0.4183 0.5921</span></span>
+<span><span class="co">#&gt; 3  total 93.85      0.3750 0.5169</span></span></code></pre></div>
 <p>Covariates and <code>observation_mask</code> are passed over the
 whole series and cut to each origin: past-only covariates and the mask
 to the context, known-future covariates to the context plus the horizon.
-A list of equal-length series is backtested as a batch at each origin.
-The backtest runs one origin after another; to spread origins over
-cores, split them and run one backtest per chunk (see
-<code><a href="../reference/timestral_backtest.html">?timestral_backtest</a></code> and the next section). For tsibbles,
-the fable route covers the same ground:
+A list of series is backtested as a batch at each origin (unequal
+lengths are end-aligned, as in <code><a href="../reference/timestral_forecast.html">timestral_forecast()</a></code>, so
+origins count time steps of the longest series). The backtest runs one
+origin after another; to spread origins over cores, split them and run
+one backtest per chunk (see <code><a href="../reference/timestral_backtest.html">?timestral_backtest</a></code> and the
+next section). For tsibbles, the fable route covers the same ground:
 <code><a href="https://tsibble.tidyverts.org/reference/stretch_tsibble.html" class="external-link">tsibble::stretch_tsibble()</a></code>, the <code><a href="../reference/TIMESTRAL.html">TIMESTRAL()</a></code>
 model and <code><a href="https://generics.r-lib.org/reference/accuracy.html" class="external-link">accuracy()</a></code>.</p>
 </div>
@@ -808,7 +836,7 @@ inputs.</li>
 compiled RcppEigen code. <code>backend = "R"</code> uses the pure-R
 reference implementation, which is slower but easy to read and step
 through. The two agree to floating-point precision:</p>
-<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">m_R</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_load.html">timestral_load</a></span><span class="op">(</span><span class="st">"28M"</span>, backend <span class="op">=</span> <span class="st">"R"</span><span class="op">)</span></span>
 <span><span class="va">f1</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_forecast.html">timestral_forecast</a></span><span class="op">(</span><span class="va">m</span>, <span class="va">AirPassengers</span>, h <span class="op">=</span> <span class="fl">36</span><span class="op">)</span></span>
 <span><span class="va">f2</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/timestral_forecast.html">timestral_forecast</a></span><span class="op">(</span><span class="va">m_R</span>, <span class="va">AirPassengers</span>, h <span class="op">=</span> <span class="fl">36</span><span class="op">)</span></span>
@@ -820,7 +848,7 @@ through. The two agree to floating-point precision:</p>
 <span>  <span class="fu"><a href="../reference/timestral_forecast.html">timestral_forecast</a></span><span class="op">(</span><span class="va">model</span>, <span class="va">AirPassengers</span>, h <span class="op">=</span> <span class="fl">36</span><span class="op">)</span><span class="op">)</span><span class="op">[[</span><span class="st">"elapsed"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>native <span class="op">=</span> <span class="fu">timing</span><span class="op">(</span><span class="va">m</span><span class="op">)</span>, R <span class="op">=</span> <span class="fu">timing</span><span class="op">(</span><span class="va">m_R</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; native      R </span></span>
-<span><span class="co">#&gt;  0.059  0.091</span></span></code></pre></div>
+<span><span class="co">#&gt;  0.043  0.092</span></span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="parallel-use">Parallel use<a class="anchor" aria-label="anchor" href="#parallel-use"></a>
@@ -829,9 +857,10 @@ through. The two agree to floating-point precision:</p>
 OpenMP, no thread pools, and no changes to BLAS threading. Parallelise
 at the R level instead (<code>parallel</code>, <code>future</code>,
 <code>mirai</code>, …), with one model per worker. For many series of
-the same length, batching (section 3) is usually the faster option; for
-a long backtest, split the origins between workers.</p>
-<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
+similar length, batching (section 3) is usually the faster option (a
+batch costs as much as its longest series); for a long backtest, split
+the origins between workers.</p>
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va">parallel</span><span class="op">)</span></span>
 <span><span class="va">series</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/split.html" class="external-link">split</a></span><span class="op">(</span><span class="va">holidays</span><span class="op">$</span><span class="va">Trips</span>, <span class="va">holidays</span><span class="op">$</span><span class="va">State</span><span class="op">)</span></span>
 <span><span class="va">fcs</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">mclapply</a></span><span class="op">(</span><span class="va">series</span>, <span class="kw">function</span><span class="op">(</span><span class="va">y</span><span class="op">)</span> <span class="op">{</span></span>
@@ -843,7 +872,7 @@ a long backtest, split the origins between workers.</p>
 <div class="section level2">
 <h2 id="session-information">Session information<a class="anchor" aria-label="anchor" href="#session-information"></a>
 </h2>
-<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb38"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/sessionInfo.html" class="external-link">sessionInfo</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="co">#&gt; R version 4.6.1 (2026-06-24)</span></span>
 <span><span class="co">#&gt; Platform: x86_64-redhat-linux-gnu</span></span>

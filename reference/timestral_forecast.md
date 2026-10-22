@@ -31,15 +31,20 @@ timestral_forecast(
   (keys become the batch, measured variables the jointly forecast
   variates), matrix or data frame with time in rows and one column per
   target variate, a 3-D array (time, variate, series), or a list of
-  per-series vectors/matrices (NA = missing; a time index shared by
-  every series in the list is kept). Variates of a series are forecast
-  jointly; series in a batch are forecast independently in one call.
-  Covariates may also be `ts`/`zoo`/`xts` or `tsibble`; when both `y`
-  and a covariate carry a time index, the covariate index must align
-  with the context (and future) index of `y`. Tsibble rows are taken in
-  index order, and implicit gaps in a regular tsibble are filled with
-  missing values; the keys of a keyed tsibble covariate are matched to
-  the series of `y` by value.
+  per-series vectors/matrices (NA = missing). The series of a list (or
+  the key groups of a tsibble) may differ in length: they are taken to
+  end at the same time, the forecast origin, and shorter ones are
+  left-padded with missing values, which does not change their
+  forecasts. A list keeps the longest series' time index when every
+  other series' index is its tail (for `ts`, the same frequency and
+  end). Variates of a series are forecast jointly; series in a batch are
+  forecast independently in one call. Covariates may also be
+  `ts`/`zoo`/`xts` or `tsibble`; when both `y` and a covariate carry a
+  time index, the covariate index must align with the context (and
+  future) index of `y`. Tsibble rows are taken in index order, and
+  implicit gaps in a regular tsibble are filled with missing values; the
+  keys of a keyed tsibble covariate are matched to the series of `y` by
+  value.
 
 - h:
 
@@ -54,7 +59,8 @@ timestral_forecast(
 - past_covariates:
 
   known over the context only (T time rows, or the batch forms described
-  for `y`)
+  for `y`; in a batch of unequal lengths, a shorter series' covariates
+  may have its own length, and are padded like it)
 
 - known_covariates:
 

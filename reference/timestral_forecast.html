@@ -75,8 +75,12 @@
 forecast variates), matrix
 or data frame with time in rows and one column per target variate, a 3-D
 array (time, variate, series), or a list of per-series vectors/matrices
-(NA = missing; a time index shared by every series in the list is
-kept). Variates of a series are forecast jointly; series in a
+(NA = missing). The series of a list (or the key groups of a tsibble)
+may differ in length: they are taken to end at the same time, the
+forecast origin, and shorter ones are left-padded with missing values,
+which does not change their forecasts. A list keeps the longest
+series' time index when every other series' index is its tail (for
+<code>ts</code>, the same frequency and end). Variates of a series are forecast jointly; series in a
 batch are forecast independently in one call. Covariates may also be
 <code>ts</code>/<code>zoo</code>/<code>xts</code> or <code>tsibble</code>; when both <code>y</code> and a covariate carry a
 time index, the covariate index must align with the context (and
@@ -98,7 +102,9 @@ additional missing values</p></dd>
 
 <dt id="arg-past-covariates">past_covariates<a class="anchor" aria-label="anchor" href="#arg-past-covariates"></a></dt>
 <dd><p>known over the context only (T time rows, or the
-batch forms described for <code>y</code>)</p></dd>
+batch forms described for <code>y</code>; in a batch of unequal lengths, a
+shorter series' covariates may have its own length, and are padded
+like it)</p></dd>
 
 
 <dt id="arg-known-covariates">known_covariates<a class="anchor" aria-label="anchor" href="#arg-known-covariates"></a></dt>

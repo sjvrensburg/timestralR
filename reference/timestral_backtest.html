@@ -62,6 +62,8 @@ forecast against the <code>h</code> values that follow with <code><a href="times
 <span>  step <span class="op">=</span> <span class="va">h</span>,</span>
 <span>  <span class="va">...</span>,</span>
 <span>  level <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">80</span>, <span class="fl">98</span><span class="op">)</span>,</span>
+<span>  period <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scale <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  keep_forecasts <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -77,7 +79,8 @@ forecast against the <code>h</code> values that follow with <code><a href="times
 <dt id="arg-y">y<a class="anchor" aria-label="anchor" href="#arg-y"></a></dt>
 <dd><p>the series to backtest: a numeric vector, <code>ts</code>/<code>mts</code>,
 <code>zoo</code>/<code>xts</code>, a matrix or data frame with time in rows, or a list of
-equal-length series (forecast as a batch at each origin)</p></dd>
+series (forecast as a batch at each origin; series of unequal length
+end together, see <code><a href="timestral_forecast.html">timestral_forecast()</a></code>)</p></dd>
 
 
 <dt id="arg-h">h<a class="anchor" aria-label="anchor" href="#arg-h"></a></dt>
@@ -104,6 +107,13 @@ covariates (over the whole series), <code>symmetric</code>, <code>clip_nonnegati
 
 <dt id="arg-level">level<a class="anchor" aria-label="anchor" href="#arg-level"></a></dt>
 <dd><p>interval levels in percent for the coverage columns</p></dd>
+
+
+<dt id="arg-period-scale">period, scale<a class="anchor" aria-label="anchor" href="#arg-period-scale"></a></dt>
+<dd><p>the scale of the scaled scores, as in
+<code><a href="timestral_score.html">timestral_score()</a></code>; <code>NULL</code> <code>period</code> takes the frequency of a <code>ts</code>
+<code>y</code>. Each origin is scaled by its own context (a <code>scale</code> function gets
+the context up to the origin).</p></dd>
 
 
 <dt id="arg-keep-forecasts">keep_forecasts<a class="anchor" aria-label="anchor" href="#arg-keep-forecasts"></a></dt>

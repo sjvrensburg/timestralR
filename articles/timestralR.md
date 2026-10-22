@@ -242,9 +242,11 @@ Two variates forecast jointly;
 facets by variate.
 
 **Batches** are independent series forecast in one call. Pass a list of
-series (or a 3-D array). The series must have the same length, and the
-result gains a leading series dimension. A time index shared by every
-series in the list is kept.
+series (or a 3-D array), and the result gains a leading series
+dimension. The series may differ in length: they are taken to end at the
+same time, and shorter ones are padded at the start with missing values,
+which leaves their forecasts unchanged. The longest series’ time index
+is kept when every other series’ index is its tail.
 
 ``` r
 
@@ -754,10 +756,14 @@ better, and for a point forecast both distribution scores reduce to
 
 sc <- timestral_score(fc_bt, test)
 head(sc, 3)
-#>   series variate step actual median pinball   crps     ae cover80 cover98
-#> 1     S1      V1    1    340  346.2    3.67  3.808  6.178    TRUE    TRUE
-#> 2     S1      V1    2    318  334.0   10.13 10.583 15.986   FALSE    TRUE
-#> 3     S1      V1    3    362  384.0   14.83 15.501 22.045   FALSE    TRUE
+#>   series variate step actual median pinball   crps     ae scale   mase
+#> 1     S1      V1    1    340  346.2    3.67  3.808  6.178 30.57 0.2021
+#> 2     S1      V1    2    318  334.0   10.13 10.583 15.986 30.57 0.5229
+#> 3     S1      V1    3    362  384.0   14.83 15.501 22.045 30.57 0.7211
+#>   scaled_pinball scaled_crps cover80 cover98
+#> 1         0.1201      0.1246    TRUE    TRUE
+#> 2         0.3315      0.3461   FALSE    TRUE
+#> 3         0.4850      0.5070   FALSE    TRUE
 colMeans(sc[, c("ae", "pinball", "crps", "cover80", "cover98")])
 #>      ae pinball    crps cover80 cover98 
 #> 14.5363 10.6317 11.0107  0.8333  1.0000
@@ -811,12 +817,37 @@ origins.](figures/timestralR-backtest-steps-1.png)
 
 Mean CRPS and absolute error by forecast step over six yearly origins.
 
+The `ae`, `pinball` and `crps` columns are in the units of the series,
+so they cannot be averaged across series of different size. The
+**scaled** columns divide them by the in-sample mean absolute error of
+the seasonal naive forecast over each origin’s context, mean \|y_(t) −
+y_(t−m)\|: `mase` (the mean absolute scaled error, once averaged),
+`scaled_pinball` and `scaled_crps`. A value below 1 means the forecast
+beat the typical one-season-back error of the context. The period *m*
+comes from the `ts` frequency (12 here); set `period` for input without
+one, or pass your own `scale` (a number per series, or a function of the
+context). The three UK lung-disease series of section 3 differ
+several-fold in size, and on the scaled scores they compare directly:
+
+``` r
+
+bt_b <- timestral_backtest(m, batch, h = 12, origins = c(48, 60))
+aggregate(cbind(crps, scaled_crps, mase) ~ series, data = bt_b, FUN = mean)
+#>   series  crps scaled_crps   mase
+#> 1 female 25.28      0.3194 0.3833
+#> 2   male 74.90      0.4183 0.5921
+#> 3  total 93.85      0.3750 0.5169
+```
+
 Covariates and `observation_mask` are passed over the whole series and
 cut to each origin: past-only covariates and the mask to the context,
 known-future covariates to the context plus the horizon. A list of
-equal-length series is backtested as a batch at each origin. The
-backtest runs one origin after another; to spread origins over cores,
-split them and run one backtest per chunk (see
+series is backtested as a batch at each origin (unequal lengths are
+end-aligned, as in
+[`timestral_forecast()`](https://sjvrensburg.github.io/timestralR/reference/timestral_forecast.md),
+so origins count time steps of the longest series). The backtest runs
+one origin after another; to spread origins over cores, split them and
+run one backtest per chunk (see
 [`?timestral_backtest`](https://sjvrensburg.github.io/timestralR/reference/timestral_backtest.md)
 and the next section). For tsibbles, the fable route covers the same
 ground:
@@ -866,7 +897,7 @@ timing <- function(model) median(replicate(3, system.time(
   timestral_forecast(model, AirPassengers, h = 36))[["elapsed"]]))
 c(native = timing(m), R = timing(m_R))
 #> native      R 
-#>  0.059  0.091
+#>  0.043  0.092
 ```
 
 ### Parallel use
@@ -874,9 +905,9 @@ c(native = timing(m), R = timing(m_R))
 The native code is deliberately **single-threaded**: no OpenMP, no
 thread pools, and no changes to BLAS threading. Parallelise at the R
 level instead (`parallel`, `future`, `mirai`, …), with one model per
-worker. For many series of the same length, batching (section 3) is
-usually the faster option; for a long backtest, split the origins
-between workers.
+worker. For many series of similar length, batching (section 3) is
+usually the faster option (a batch costs as much as its longest series);
+for a long backtest, split the origins between workers.
 
 ``` r
 

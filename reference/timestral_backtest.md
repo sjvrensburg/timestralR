@@ -17,6 +17,8 @@ timestral_backtest(
   step = h,
   ...,
   level = c(80, 98),
+  period = NULL,
+  scale = NULL,
   keep_forecasts = FALSE
 )
 ```
@@ -31,8 +33,9 @@ timestral_backtest(
 - y:
 
   the series to backtest: a numeric vector, `ts`/`mts`, `zoo`/`xts`, a
-  matrix or data frame with time in rows, or a list of equal-length
-  series (forecast as a batch at each origin)
+  matrix or data frame with time in rows, or a list of series (forecast
+  as a batch at each origin; series of unequal length end together, see
+  [`timestral_forecast()`](https://sjvrensburg.github.io/timestralR/reference/timestral_forecast.md))
 
 - h:
 
@@ -61,6 +64,14 @@ timestral_backtest(
 - level:
 
   interval levels in percent for the coverage columns
+
+- period, scale:
+
+  the scale of the scaled scores, as in
+  [`timestral_score()`](https://sjvrensburg.github.io/timestralR/reference/timestral_score.md);
+  `NULL` `period` takes the frequency of a `ts` `y`. Each origin is
+  scaled by its own context (a `scale` function gets the context up to
+  the origin).
 
 - keep_forecasts:
 
