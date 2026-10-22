@@ -10,7 +10,7 @@
 ## Citation
 
 Source:
-[`DESCRIPTION`](https://github.com/sjvrensburg/timestralR/blob/HEAD/DESCRIPTION)
+[`DESCRIPTION`](https://github.com/sjvrensburg/timestralR/blob/main/DESCRIPTION)
 
 Janse van Rensburg S (2026). *timestralR: Zero-Shot Probabilistic
 Forecasting with Timestral*. R package version 0.5.0,

@@ -13,6 +13,7 @@ official `timestral` Python package.
 ## Install
 
 ``` r
+
 remotes::install_github("sjvrensburg/timestralR")
 # or from a clone:
 # R CMD INSTALL timestralR   (or devtools::install())
@@ -33,6 +34,7 @@ The vignette walks through every feature with plots:
 [`vignette("timestralR")`](https://sjvrensburg.github.io/timestralR/articles/timestralR.md).
 
 ``` r
+
 library(timestralR)
 m  <- timestral_load("28M")                  # or a local directory or Hub repo ID
 fc <- timestral_forecast(m, AirPassengers, h = 24)
@@ -49,6 +51,7 @@ forecast as a batch. Columns of a series are forecast jointly; `NA`
 marks missing values, and `observation_mask` can mark more.
 
 ``` r
+
 # multivariate: columns are forecast jointly
 fc2 <- timestral_forecast(m, cbind(mdeaths, fdeaths), h = 12)
 
@@ -68,6 +71,7 @@ fc3 <- timestral_forecast(m, y, h = 12,
 ### tidyverts and ggplot2
 
 ``` r
+
 library(tsibble)
 library(fable)
 
@@ -96,6 +100,7 @@ mables stay small when saved and work in parallel workers.
 ### forecast package and `predict()`
 
 ``` r
+
 fo <- forecast::forecast(m, AirPassengers, h = 24)   # a "forecast" object
 forecast::accuracy(fo, test)                         # test-set measures
 timestral_as_forecast(fc, level = c(80, 98))         # convert an existing forecast
@@ -106,6 +111,7 @@ timestral_supports_known_covariates(m)               # can it use known-future c
 ### Evaluating forecasts
 
 ``` r
+
 bt <- timestral_backtest(m, AirPassengers, h = 12,       # forecast from each origin,
                          origins = seq(72, 132, by = 12)) # score against what followed
 aggregate(cbind(ae, pinball, crps, cover80) ~ step, data = bt, FUN = mean)

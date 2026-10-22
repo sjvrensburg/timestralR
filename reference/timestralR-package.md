@@ -28,6 +28,8 @@ Useful links:
 
 - <https://github.com/sjvrensburg/timestralR>
 
+- <https://sjvrensburg.github.io/timestralR/>
+
 - Report bugs at <https://github.com/sjvrensburg/timestralR/issues>
 
 ## Author

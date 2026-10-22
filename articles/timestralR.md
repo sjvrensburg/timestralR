@@ -26,6 +26,7 @@ This vignette covers the whole interface:
 9.  options, backends, and using the package in parallel code.
 
 ``` r
+
 library(timestralR)
 library(ggplot2)
 library(patchwork)
@@ -48,6 +49,7 @@ loads from disk. A local directory holding `config.json` and
 model.
 
 ``` r
+
 m <- timestral_load("28M")
 m
 #> <timestral_model> 49b26409ac87b5935539a5d8ffe7f397b720db47  d_model = 384  layers = 12  max_context = 32768 
@@ -64,6 +66,7 @@ same 21 quantile levels (another checkpoint’s own levels are in each
 forecast’s `fc$levels`):
 
 ``` r
+
 timestral_levels()
 #>  [1] 0.01 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45 0.50 0.55 0.60 0.65 0.70
 #> [16] 0.75 0.80 0.85 0.90 0.95 0.99
@@ -76,6 +79,7 @@ takes a model, a series `y`, and a horizon `h`. Here we forecast three
 years of the classic airline passengers series.
 
 ``` r
+
 fc <- timestral_forecast(m, AirPassengers, h = 36)
 fc
 #> <timestral_forecast> 1 variate(s), h = 36, 21 quantiles
@@ -98,6 +102,7 @@ draws a fan chart: the observed history, the median forecast, and nested
 50%, 80%, 90% and 98% central intervals.
 
 ``` r
+
 plot(fc, main = "AirPassengers: 36-month Timestral forecast",
      ylab = "Passengers (thousands)")
 ```
@@ -116,6 +121,7 @@ The accessors return single levels; because the input was a `ts`, they
 return a `ts` that starts right after the data.
 
 ``` r
+
 dim(fc$quantiles)
 #> [1]  1 36 21
 window(timestral_median(fc), end = c(1961, 6))
@@ -131,6 +137,7 @@ gives a tidy long data frame with one column per quantile level and the
 forecast time:
 
 ``` r
+
 head(as_forecast_df(fc)[, c("variate", "step", "time", "q10", "q50", "q90")])
 #>   variate step time   q10   q50   q90
 #> 1      V1    1 1961 430.6 447.3 465.2
@@ -149,6 +156,7 @@ draws the same fan chart as a ggplot object, so the usual ggplot2
 modifications apply.
 
 ``` r
+
 autoplot(fc) +
   labs(title = "AirPassengers", y = "Passengers (thousands)")
 ```
@@ -164,6 +172,7 @@ use is a backtest. Hold out the last three years, forecast them, and
 overlay what actually happened:
 
 ``` r
+
 train <- window(AirPassengers, end = c(1957, 12))
 test  <- window(AirPassengers, start = c(1958, 1))
 fc_bt <- timestral_forecast(m, train, h = length(test))
@@ -191,6 +200,7 @@ How well calibrated are the intervals here? The share of held-out months
 inside each central interval:
 
 ``` r
+
 q <- fc_bt$quantiles[1, , ]
 lv <- fc_bt$levels
 inside <- function(p) {
@@ -214,6 +224,7 @@ across them, so related series can inform each other. Pass a matrix,
 data frame or `mts` with one column per variate.
 
 ``` r
+
 deaths <- cbind(male = mdeaths, female = fdeaths)
 fc_mv <- timestral_forecast(m, deaths, h = 24)
 dim(fc_mv$quantiles)
@@ -236,6 +247,7 @@ result gains a leading series dimension. A time index shared by every
 series in the list is kept.
 
 ``` r
+
 batch <- list(total = ldeaths, male = mdeaths, female = fdeaths)
 fc_b <- timestral_forecast(m, batch, h = 24)
 dim(fc_b$quantiles)
@@ -261,6 +273,7 @@ product. Each series is still forecast independently: the results match
 one-at-a-time forecasts.
 
 ``` r
+
 fc_one <- timestral_forecast(m, mdeaths, h = 24)
 max(abs(fc_b$quantiles["male", 1, , ] - fc_one$quantiles[1, , ]))
 #> [1] 6.821e-12
@@ -272,6 +285,7 @@ max(abs(fc_b$quantiles["male", 1, , ] - fc_one$quantiles[1, , ]))
 Below, a whole year of the passengers series is lost:
 
 ``` r
+
 ap_gap <- AirPassengers
 window(ap_gap, start = c(1955, 1), end = c(1955, 12)) <- NA
 fc_gap <- timestral_forecast(m, ap_gap, h = 36)
@@ -291,6 +305,7 @@ anomalies. Here a data-entry error multiplies one month by ten. Masking
 that month removes its influence on the forecast:
 
 ``` r
+
 ap_bad <- AirPassengers
 ap_bad[length(ap_bad) - 3] <- 10 * ap_bad[length(ap_bad) - 3]
 mask <- rep(TRUE, length(ap_bad))
@@ -333,6 +348,7 @@ promotion calendar is planned, so it is also known for the 8 weeks we
 want to forecast.
 
 ``` r
+
 n_ctx <- 364; h <- 56; n <- n_ctx + h
 day <- seq_len(n)
 weekday <- (day - 1) %% 7                       # 0 = Monday
@@ -364,6 +380,7 @@ known covariate, and the weekday as a categorical known covariate, lets
 it place them:
 
 ``` r
+
 fc_plain <- timestral_forecast(m, y_ctx, h = h)
 fc_cov <- timestral_forecast(
   m, y_ctx, h = h,
@@ -373,6 +390,7 @@ fc_cov <- timestral_forecast(
 ```
 
 ``` r
+
 cov_panel <- function(f, title) {
   qs <- f$quantiles[1, , ]
   d <- data.frame(day = n_ctx + seq_len(h), actual = sales[n_ctx + seq_len(h)],
@@ -402,6 +420,7 @@ A simple score shows the gain, using the mean absolute error of the
 median and the mean pinball (quantile) loss over all 21 levels:
 
 ``` r
+
 actual <- sales[n_ctx + seq_len(h)]
 pinball <- function(f) {
   qs <- f$quantiles[1, , ]
@@ -434,6 +453,7 @@ keep their index (Dates, POSIXct, …). The forecast stores a
 reports real dates.
 
 ``` r
+
 library(zoo)
 dates <- as.Date("2024-01-01") + seq_len(n) - 1
 sales_z <- zoo(sales, order.by = dates)
@@ -450,6 +470,7 @@ When `y` and a covariate both carry a time index, the indexes must line
 up. This catches off-by-one and misaligned joins early:
 
 ``` r
+
 promo_z <- zoo(cbind(promo = promo), order.by = dates + 1)  # shifted a day
 tryCatch(
   timestral_forecast(m, sales_z[seq_len(n_ctx)], h = 14,
@@ -470,6 +491,7 @@ missing values. Here are quarterly holiday trips to four Australian
 states:
 
 ``` r
+
 library(tsibble)
 library(dplyr)
 holidays <- tourism |>
@@ -498,6 +520,7 @@ holidays
 ```
 
 ``` r
+
 fc_ts <- timestral_forecast(m, holidays, h = 12)
 dim(fc_ts$quantiles)          # series x variate x step x level
 #> [1]  4  1 12 21
@@ -527,6 +550,7 @@ index gets the same class that
 gives the `ts` (`yearmonth`, `yearquarter`, …).
 
 ``` r
+
 fc_long <- as_tsibble(fc_ts) |> as_tibble() |> rename(State = series)
 recent <- holidays |> filter(Quarter >= yearquarter("2010 Q1"))
 ggplot(mapping = aes(Quarter)) +
@@ -553,6 +577,7 @@ converts a forecast to a fable whose distribution column holds the
 applies:
 
 ``` r
+
 library(fabletools)
 fbl <- as_fable(fc_ts)
 fbl
@@ -593,6 +618,7 @@ univariate; each key gets its own context. Here we hold out the last
 three years, fit three models per state, and compare them.
 
 ``` r
+
 library(fable)
 train_tb <- holidays |> filter(Quarter <= yearquarter("2014 Q4"))
 test_tb  <- holidays |> filter(Quarter >  yearquarter("2014 Q4"))
@@ -616,6 +642,7 @@ fc_fbl <- fit |> forecast(h = "3 years")
 ```
 
 ``` r
+
 library(ggtime)   # fable's plotting methods live in ggtime
 fc_fbl |>
   autoplot(holidays |> filter(Quarter >= yearquarter("2011 Q1")),
@@ -638,6 +665,7 @@ measures, including the continuous ranked probability score (CRPS),
 evaluate the whole predictive distribution:
 
 ``` r
+
 fc_fbl |>
   accuracy(holidays, measures = list(RMSE = RMSE, MASE = MASE,
                                      CRPS = CRPS)) |>
@@ -660,6 +688,7 @@ disk when needed. The whole mable, with its three models for four states
 and the training data, is a fraction of the size of the weights:
 
 ``` r
+
 c(mable_MB   = length(serialize(fit, NULL)) / 1e6,
   weights_MB = file.size(file.path(m$dir, "model.safetensors")) / 1e6)
 #>   mable_MB weights_MB 
@@ -682,6 +711,7 @@ two knots: the default is 80% and 98%, because the 21 knots have no 2.5%
 and 97.5% quantiles for the usual 95%.
 
 ``` r
+
 ap_train <- window(AirPassengers, end = c(1957, 12))
 ap_test  <- window(AirPassengers, start = c(1958, 1))
 fo <- forecast::forecast(m, ap_train, h = 36)
@@ -695,6 +725,7 @@ The training-set row is empty because a zero-shot model is not fitted to
 the context, so there are no in-sample fitted values.
 
 ``` r
+
 autoplot(fo) +
   autolayer(ap_test, series = "held out") +
   labs(title = "Timestral via forecast::forecast() (80% and 98% intervals)",
@@ -720,6 +751,7 @@ better, and for a point forecast both distribution scores reduce to
 (about) the absolute error. Here is the section 2 backtest, scored:
 
 ``` r
+
 sc <- timestral_score(fc_bt, test)
 head(sc, 3)
 #>   series variate step actual median pinball   crps     ae cover80 cover98
@@ -739,6 +771,7 @@ forward a year at a time over the last six years of `AirPassengers`,
 with a 12-month horizon each time:
 
 ``` r
+
 bt <- timestral_backtest(m, AirPassengers, h = 12,
                          origins = seq(72, 132, by = 12))
 head(bt[, c("origin", "step", "t", "actual", "median", "crps")], 3)
@@ -760,6 +793,7 @@ Averaging by forecast step shows how accuracy falls off with the
 horizon:
 
 ``` r
+
 by_step <- aggregate(cbind(ae, crps) ~ step, data = bt, FUN = mean)
 ggplot(rbind(data.frame(step = by_step$step, score = "absolute error",
                         value = by_step$ae),
@@ -820,6 +854,7 @@ implementation, which is slower but easy to read and step through. The
 two agree to floating-point precision:
 
 ``` r
+
 m_R <- timestral_load("28M", backend = "R")
 f1 <- timestral_forecast(m, AirPassengers, h = 36)
 f2 <- timestral_forecast(m_R, AirPassengers, h = 36)
@@ -844,6 +879,7 @@ usually the faster option; for a long backtest, split the origins
 between workers.
 
 ``` r
+
 library(parallel)
 series <- split(holidays$Trips, holidays$State)
 fcs <- mclapply(series, function(y) {
@@ -855,6 +891,7 @@ fcs <- mclapply(series, function(y) {
 ## Session information
 
 ``` r
+
 sessionInfo()
 #> R version 4.6.1 (2026-06-24)
 #> Platform: x86_64-redhat-linux-gnu
