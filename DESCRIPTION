@@ -7,7 +7,8 @@ Authors@R: c(
            email = "sjansevanrensburg@gmail.com"),
     person("Mistral AI", role = "cph",
            comment = "authors of the 'timestral' Python package ported in R/ and src/"))
-URL: https://github.com/sjvrensburg/timestralR
+URL: https://github.com/sjvrensburg/timestralR,
+    https://sjvrensburg.github.io/timestralR/
 BugReports: https://github.com/sjvrensburg/timestralR/issues
 Description: Runs Mistral AI's Timestral time-series foundation models from R
     without Python or PyTorch. The official 'safetensors' checkpoints are

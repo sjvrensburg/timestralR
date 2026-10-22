@@ -5,3 +5,6 @@
 ^CLAUDE\.md$
 ^vignettes/.*\.orig$
 ^vignettes/precompile\.R$
+^_pkgdown\.yml$
+^site$
+^pkgdown$

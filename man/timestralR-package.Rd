@@ -23,6 +23,7 @@ ggplot2 and the tidyverts.
 Useful links:
 \itemize{
   \item \url{https://github.com/sjvrensburg/timestralR}
+  \item \url{https://sjvrensburg.github.io/timestralR/}
   \item Report bugs at \url{https://github.com/sjvrensburg/timestralR/issues}
 }
 
