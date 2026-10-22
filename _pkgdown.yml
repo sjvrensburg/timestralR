@@ -14,6 +14,7 @@ template:
     code_font: {google: "JetBrains Mono"}
   includes:
     in_header: |
+      <meta name="google-site-verification" content="-A7LEQuYZAN5X9vi3GvAeEQm4Z2Ts911HRdYEOaFc_I" />
       <meta name="keywords" content="time series forecasting, R, Timestral, Mistral AI, foundation model, zero-shot, probabilistic forecast, safetensors, tsibble, fable">
       <meta name="twitter:card" content="summary_large_image">
       <script type="application/ld+json">
