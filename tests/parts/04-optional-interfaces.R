@@ -225,3 +225,17 @@ if (requireNamespace("forecast", quietly = TRUE)) {
   if (requireNamespace("fabletools", quietly = TRUE))
     stopifnot(inherits(fabletools::forecast(m, ap_tr, h = 3), "forecast"))
 }
+
+## tsibble key groups may start at different times but must end together
+if (requireNamespace("tsibble", quietly = TRUE)) {
+  du <- tsibble::as_tsibble(
+    data.frame(t = c(1:150, 61:150), k = rep(c("a", "b"), c(150, 90)),
+               v = c(ua, ub)), key = k, index = t)
+  fc_tu <- timestral_forecast(m, du, h = 8)
+  stopifnot(max(abs(fc_tu$quantiles[2, , , ] -
+                    timestral_forecast(m, ub, h = 8)$quantiles[1, , ])) < 1e-10)
+  du_bad <- tsibble::as_tsibble(
+    data.frame(t = c(1:150, 51:140), k = rep(c("a", "b"), c(150, 90)),
+               v = c(ua, ub)), key = k, index = t)
+  .expect_error(timestral_forecast(m, du_bad, h = 8), "must end at the same time")
+}

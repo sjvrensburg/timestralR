@@ -34,6 +34,61 @@
   (c(d, 0) + c(0, d)) / 2
 }
 
+## In-sample seasonal-naive MAE of one context row, mean |y_t - y_{t-m}|
+## over the pairs observed at both ends: the MASE denominator of Hyndman &
+## Koehler (2006). Leading missing values (padding, a late start) are
+## dropped first; with no more than m steps left, lag 1 is used (as in M4).
+.snaive_scale <- function(x, m) {
+  first <- which(!is.na(x))[1L]
+  if (is.na(first)) return(NA_real_)
+  x <- x[first:length(x)]
+  n <- length(x)
+  if (n <= m) m <- 1L
+  if (n <= m) return(NA_real_)
+  d <- abs(x[(m + 1L):n] - x[seq_len(n - m)])
+  if (all(is.na(d))) NA_real_ else mean(d, na.rm = TRUE)
+}
+
+## (series, variate) matrix of scales for the scaled scores: the default
+## seasonal-naive scale, a user number (one, per series, or per series and
+## variate) or a function of each context row. Unusable scales (zero,
+## negative, missing) become NA with one warning of class
+## "timestral_scale_warning".
+.score_scales <- function(obs, period, scale, snames, vnames) {
+  B <- dim(obs)[1]; V <- dim(obs)[2]
+  if (is.null(scale)) {
+    sc <- apply(obs, c(1, 2), .snaive_scale, m = period)
+  } else if (is.function(scale)) {
+    sc <- apply(obs, c(1, 2), function(x) {
+      v <- scale(x)
+      if (!is.numeric(v) || length(v) != 1L)
+        stop("a scale function must return a single number")
+      v
+    })
+  } else {
+    if (!is.numeric(scale) || !(length(scale) %in% c(1L, B, B * V)))
+      stop("scale must be NULL, a function, or numbers: one, one per series (",
+           B, "), or one per series and variate (", B, " x ", V, ")")
+    sc <- if (length(scale) == B * V && length(scale) > B) matrix(scale, B, V)
+      else matrix(rep_len(scale, B), B, V)
+  }
+  sc <- matrix(as.numeric(sc), B, V)
+  bad <- !is.finite(sc) | sc <= 0
+  if (any(bad)) {
+    who <- which(bad, arr.ind = TRUE)
+    lab <- unique(paste0(snames[who[, 1]],
+                         if (V > 1L) paste0("/", vnames[who[, 2]])))
+    warning(structure(class = c("timestral_scale_warning", "warning", "condition"),
+                      list(message = paste0(
+                        "the scale is zero or missing for ",
+                        paste(lab, collapse = ", "),
+                        " (a constant or too-short context); its scaled ",
+                        "scores are NA"), call = NULL, labels = lab)))
+    sc[bad] <- NA_real_
+  }
+  sc
+}
+
 #' Score quantile forecasts against realised values
 #'
 #' Scores a [timestral_forecast()] against the values that were later
@@ -58,6 +113,20 @@
 #' * `cover<L>`: whether \eqn{y} lies in the central `L`% interval, for
 #'   each `level`; each level must pair two knots, as in [plot()].
 #'
+#' The scaled scores divide `ae`, `pinball` and `crps` by a scale of the
+#' series, so they can be averaged across series of different magnitude:
+#' `mase` (averaged, the mean absolute scaled error of Hyndman and Koehler,
+#' 2006), `scaled_pinball` and `scaled_crps`; the `scale` column holds the
+#' divisor. By default the scale is the in-sample mean absolute error of
+#' the seasonal naive forecast over the forecast's context,
+#' \eqn{\mathrm{mean}|y_t - y_{t-m}|} for the seasonal period \eqn{m}
+#' (`period`), over pairs of observed values from the first observed value
+#' on. A context with no more than \eqn{m} steps uses lag 1, as in the M4
+#' competition. In a backtest each origin is scaled by its own context, so
+#' the scale never uses values after the origin. A scale that is zero (a
+#' constant context) or cannot be computed gives `NA` scaled scores and a
+#' warning.
+#'
 #' Missing actual values give missing scores. Average the rows with
 #' [stats::aggregate()] or dplyr to summarise by step, series or origin.
 #'
@@ -68,9 +137,17 @@
 #'   (time, variate, series), or a list of those per series
 #' @param level interval levels in percent for the coverage columns
 #'   (fractions in (0, 1) are taken as percentages)
+#' @param period seasonal period \eqn{m} of the default scale; `NULL`
+#'   takes the frequency of a `ts` forecast and 1 otherwise. Set it for
+#'   seasonal `zoo`, `xts` or plain input, which carry no period.
+#' @param scale `NULL` for the seasonal-naive scale, or your own: one
+#'   positive number, one per series, a series-by-variate matrix, or a
+#'   function of one context (a numeric vector, `NA` where missing)
+#'   returning one number, such as
+#'   `function(x) mean(abs(x), na.rm = TRUE)`
 #' @return A data frame with columns `series`, `variate`, `step`,
-#'   `actual`, `median`, `pinball`, `crps`, `ae` and one `cover<L>`
-#'   column per level.
+#'   `actual`, `median`, `pinball`, `crps`, `ae`, `scale`, `mase`,
+#'   `scaled_pinball`, `scaled_crps` and one `cover<L>` column per level.
 #' @seealso [timestral_backtest()] to forecast and score from several
 #'   origins.
 #' @examples
@@ -78,9 +155,10 @@
 #' train <- window(AirPassengers, end = c(1959, 12))
 #' test <- window(AirPassengers, start = c(1960, 1))
 #' sc <- timestral_score(timestral_forecast(m, train, h = 12), test)
-#' colMeans(sc[, c("pinball", "crps", "ae", "cover80")])
+#' colMeans(sc[, c("pinball", "crps", "ae", "mase", "scaled_crps", "cover80")])
 #' @export
-timestral_score <- function(fc, actual, level = c(80, 98)) {
+timestral_score <- function(fc, actual, level = c(80, 98), period = NULL,
+                            scale = NULL) {
   stopifnot(inherits(fc, "timestral_forecast"))
   q <- fc$quantiles
   if (fc$n_series == 1L) q <- array(q, c(1L, dim(q)), list(NULL, dimnames(q)[[1L]],
@@ -119,6 +197,15 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
                     crps = flat(sum_k(2 * w)),
                     stringsAsFactors = FALSE)
   out$ae <- abs(out$median - out$actual)
+  if (is.null(period)) period <- if (!is.null(fc$tsp)) round(fc$tsp[3]) else 1L
+  if (!is.numeric(period) || length(period) != 1L || !is.finite(period) ||
+      period < 1 || period != round(period))
+    stop("period must be a single whole number >= 1")
+  sc <- .score_scales(fc$observed, as.integer(period), scale, snames, vnames)
+  out$scale <- rep(as.vector(t(sc)), each = d[3])
+  out$mase <- out$ae / out$scale
+  out$scaled_pinball <- out$pinball / out$scale
+  out$scaled_crps <- out$crps / out$scale
   for (j in seq_along(level)) {
     lo <- flat(level_k(ik$lo[j]))
     hi <- flat(level_k(ik$hi[j]))
@@ -130,16 +217,19 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 
 ## Per-series covariates as a list of matrices with time in rows, parsed
 ## and validated by timestral_forecast()'s own parser at their full length.
-.cov_list <- function(x, B, name, snames) {
+## The full length is that of a longest series' covariates; those of a
+## shorter (left-padded) series may have its own length and are padded.
+.cov_list <- function(x, B, name, snames, pad) {
   if (inherits(x, "tbl_ts"))
     stop("timestral_backtest() does not take tsibble covariates; see ",
          "?timestral_backtest for tsibble data")
-  first <- if (is.list(x) && !is.data.frame(x)) x[[1L]] else x
+  full <- if (is.list(x) && !is.data.frame(x) && length(x) == B)
+    x[[which.min(pad)]] else x
   len <- if (is.array(x) && length(dim(x)) == 3L) dim(x)[1]
-    else NROW(.strip_time_index(first)$values)
+    else NROW(.strip_time_index(full)$values)
   parsed <- .as_cov_batch(x, B, len, name,
                           categorical = grepl("^categorical", name),
-                          snames = snames)
+                          snames = snames, pad = pad)
   lapply(parsed, t)
 }
 
@@ -189,7 +279,8 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' @param model a `timestral_model` from [timestral_load()]
 #' @param y the series to backtest: a numeric vector, `ts`/`mts`,
 #'   `zoo`/`xts`, a matrix or data frame with time in rows, or a list of
-#'   equal-length series (forecast as a batch at each origin)
+#'   series (forecast as a batch at each origin; series of unequal length
+#'   end together, see [timestral_forecast()])
 #' @param h forecast horizon in steps
 #' @param origins forecast origins as time indices (the last context
 #'   step); overrides `initial` and `step`
@@ -198,6 +289,10 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' @param ... arguments to [timestral_forecast()]: `observation_mask`,
 #'   covariates (over the whole series), `symmetric`, `clip_nonnegative`
 #' @param level interval levels in percent for the coverage columns
+#' @param period,scale the scale of the scaled scores, as in
+#'   [timestral_score()]; `NULL` `period` takes the frequency of a `ts`
+#'   `y`. Each origin is scaled by its own context (a `scale` function gets
+#'   the context up to the origin).
 #' @param keep_forecasts keep each origin's `timestral_forecast` in the
 #'   `"forecasts"` attribute of the result (a list named by origin)
 #' @return A data frame with one row per origin, series, variate and step:
@@ -226,6 +321,7 @@ timestral_score <- function(fc, actual, level = c(80, 98)) {
 #' @export
 timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
                                step = h, ..., level = c(80, 98),
+                               period = NULL, scale = NULL,
                                keep_forecasts = FALSE) {
   stopifnot(inherits(model, "timestral_model"))
   if (inherits(y, "tbl_ts"))
@@ -280,7 +376,7 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   known_names <- c("known_covariates", "categorical_known_covariates")
   cov_names <- intersect(names(args), c(past_names, known_names))
   covs <- stats::setNames(lapply(cov_names, function(nm)
-    .cov_list(args[[nm]], tg$B, nm, tg$snames)), cov_names)
+    .cov_list(args[[nm]], tg$B, nm, tg$snames, tg$pad)), cov_names)
   covs <- covs[lengths(covs) > 0L]   # zero-column covariates: none
   for (nm in names(covs)) {
     need <- if (nm %in% known_names) max(origins) + h else max(origins)
@@ -316,6 +412,9 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   } else if (!is.null(tg$index)) {
     function(t) tg$index[t]
   }
+  ## the forecasts are made from arrays, which carry no ts frequency
+  if (is.null(period)) period <- if (!is.null(tg$tsp)) round(tg$tsp[3]) else 1L
+  scale_warned <- character(0)
   forecasts <- if (keep_forecasts) vector("list", length(origins))
   rows <- vector("list", length(origins))
   ## origins congruent modulo patch_size pad alike, so the later one's
@@ -334,8 +433,14 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
     }
     fc <- do.call(timestral_forecast, call_args)
     if (keep_forecasts) forecasts[[i]] <- fc
-    sc <- timestral_score(fc, as_input(actual_arr[, , o + seq_len(h), drop = FALSE]),
-                          level = level)
+    ## one warning for all origins, not one per origin
+    sc <- withCallingHandlers(
+      timestral_score(fc, as_input(actual_arr[, , o + seq_len(h), drop = FALSE]),
+                      level = level, period = period, scale = scale),
+      timestral_scale_warning = function(w) {
+        scale_warned <<- union(scale_warned, paste0(w$labels, " at origin ", o))
+        invokeRestart("muffleWarning")
+      })
     ## a one-series forecast carries no series name; label as the batch
     sc$series <- rep(slabels, each = nrow(sc) / tg$B)
     tt <- o + sc$step
@@ -348,6 +453,13 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   }
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
+  if (length(scale_warned))
+    warning("the scale is zero or missing for ",
+            paste(utils::head(scale_warned, 5L), collapse = ", "),
+            if (length(scale_warned) > 5L)
+              paste0(" and ", length(scale_warned) - 5L, " more"),
+            " (a constant or too-short context); those scaled scores are NA",
+            call. = FALSE)
   if (keep_forecasts) attr(out, "forecasts") <- stats::setNames(forecasts, origins)
   out
 }

@@ -25,8 +25,12 @@ timestral_forecast(
 forecast variates), matrix
 or data frame with time in rows and one column per target variate, a 3-D
 array (time, variate, series), or a list of per-series vectors/matrices
-(NA = missing; a time index shared by every series in the list is
-kept). Variates of a series are forecast jointly; series in a
+(NA = missing). The series of a list (or the key groups of a tsibble)
+may differ in length: they are taken to end at the same time, the
+forecast origin, and shorter ones are left-padded with missing values,
+which does not change their forecasts. A list keeps the longest
+series' time index when every other series' index is its tail (for
+\code{ts}, the same frequency and end). Variates of a series are forecast jointly; series in a
 batch are forecast independently in one call. Covariates may also be
 \code{ts}/\code{zoo}/\code{xts} or \code{tsibble}; when both \code{y} and a covariate carry a
 time index, the covariate index must align with the context (and
@@ -42,7 +46,9 @@ value.}
 additional missing values}
 
 \item{past_covariates}{known over the context only (T time rows, or the
-batch forms described for \code{y})}
+batch forms described for \code{y}; in a batch of unequal lengths, a
+shorter series' covariates may have its own length, and are padded
+like it)}
 
 \item{known_covariates}{known over context and horizon (T + h time rows)}
 

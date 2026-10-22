@@ -73,7 +73,16 @@ Decisions taken, for reference when extending them:
   reuse each other's context (12 origins at step 32 on 28M: 1.30 to
   0.63 s). Not covered: covariate forecasts (the window path has no
   cache) and contexts past `max_context` (RoPE positions shift).
-- **Scaled scores:** MASE or scaled CRPS need a baseline (seasonal naive)
-  and a seasonal period.
-- **Unequal-length batches:** a list `y` must have equal-length series,
-  as in `timestral_forecast()`.
+- ~~**Scaled scores**~~ (done): `mase`, `scaled_pinball` and
+  `scaled_crps`, divided by the in-sample seasonal-naive MAE of each
+  origin's context (`period` from the `ts` frequency, else 1; lag 1 when
+  the context is too short, as in M4), or a user `scale` (numbers or a
+  function of the context). Matches `forecast::accuracy()`'s MASE.
+- **Relative skill (deferred):** scores relative to a baseline forecast
+  scored on the same targets (the Chronos/GIFT-Eval style geometric mean
+  of ratios), e.g. `timestral_skill(bt, bt_baseline)` joining two scored
+  data frames on origin, series, variate and step. Needs a way to score
+  non-Timestral quantile forecasts.
+- ~~**Unequal-length batches**~~ (done): series are end-aligned and
+  left-padded with NA (exact: padding does not change a forecast), in
+  lists, tsibble key groups, covariates and masks, and the backtest.

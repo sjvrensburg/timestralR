@@ -3,13 +3,14 @@
 ## `.expect_error`.
 
 ## a minimal forecast object with the given knots and quantiles
-## (series 1, variate 1, steps in rows of `qmat`)
-.fake_fc <- function(levels, qmat) {
+## (series 1, variate 1, steps in rows of `qmat`) and context `obs`
+.fake_fc <- function(levels, qmat, obs = c(1, 3, 2, 6), tsp = NULL) {
   qmat <- matrix(qmat, ncol = length(levels))
   structure(list(quantiles = array(qmat, c(1L, dim(qmat)),
                                    list(variate = "V1", step = NULL,
                                         level = format(levels))),
-                 levels = levels, h = nrow(qmat), n_series = 1L),
+                 levels = levels, h = nrow(qmat), n_series = 1L,
+                 observed = array(obs, c(1L, 1L, length(obs))), tsp = tsp),
             class = "timestral_forecast")
 }
 
@@ -33,7 +34,8 @@ stopifnot(isTRUE(all.equal(sc$pinball, c(3, 4))),
           isTRUE(all.equal(sc$crps, 0.98 * c(3, 4))),
           identical(names(sc), c("series", "variate", "step", "actual",
                                  "median", "pinball", "crps", "ae",
-                                 "cover80", "cover98")))
+                                 "scale", "mase", "scaled_pinball",
+                                 "scaled_crps", "cover80", "cover98")))
 ## a missing actual gives missing scores, not an error
 sc <- timestral_score(.fake_fc(lv, matrix(5, 2, 21)), c(NA, 9))
 stopifnot(is.na(sc$pinball[1]), is.na(sc$cover80[1]), !is.na(sc$crps[2]))
@@ -173,3 +175,80 @@ stopifnot(.reused(m_w) - r0 - .cost(102) == 2 * ll70)
 m_b <- .fresh()
 invisible(timestral_backtest(m_b, y_kv, h = 40, origins = c(70, 85, 102)))
 stopifnot(.reused(m_b) - (.cost(70) + .cost(85) + .cost(102)) == 2 * ll70)
+
+## unequal-length batches: origins index the end-aligned (padded) series
+bt_u <- timestral_backtest(m, list(a = ua, b = ub), h = 10, origins = c(100, 130))
+bt_ub <- timestral_backtest(m, ub, h = 10, origins = c(40, 70))
+stopifnot(max(abs(bt_u$crps[bt_u$series == "b"] - bt_ub$crps)) < 1e-10,
+          identical(bt_u$t[bt_u$series == "b"], bt_ub$t + 60L))
+.expect_error(timestral_backtest(m, list(ua, ub), h = 10, origins = 50),
+              "series 2 of y has no observed value up to origin 50")
+bt_upc <- timestral_backtest(m, list(ua, ub), h = 10, origins = 130,
+                             past_covariates = list(pc_a, pc_b))
+stopifnot(max(abs(bt_upc$crps[bt_upc$series == "S2"] -
+                  timestral_backtest(m, ub, h = 10, origins = 70,
+                                     past_covariates = pc_b)$crps)) < 1e-10)
+
+## scaled scores: the default scale is the in-sample seasonal-naive MAE of
+## the context, mean |y_t - y_{t-m}| over observed pairs
+sc <- timestral_score(.fake_fc(lv, matrix(5, 2, 21)), c(2, 9))  # lag 1: (2+1+4)/3
+stopifnot(isTRUE(all.equal(sc$scale, rep(7 / 3, 2))),
+          isTRUE(all.equal(sc$mase, sc$ae / (7 / 3))),
+          isTRUE(all.equal(sc$scaled_crps, sc$crps / (7 / 3))),
+          isTRUE(all.equal(sc$scaled_pinball, sc$pinball / (7 / 3))))
+obs_s <- c(NA, NA, 1, 4, 2, 8, NA, 3)   # leading NA dropped; lag 2 pairs
+sc <- timestral_score(.fake_fc(lv, matrix(5, 1, 21), obs_s), 6, period = 2)
+stopifnot(isTRUE(all.equal(sc$scale, mean(c(1, 4, 5)))))   # |2-1|, |8-4|, |3-8|
+## the period defaults to the ts frequency; too short a context uses lag 1
+stopifnot(isTRUE(all.equal(
+  timestral_score(.fake_fc(lv, matrix(5, 1, 21), 1:6 * c(1, 2), tsp = c(1, 2, 2)),
+                  6)$scale,
+  mean(abs(diff(1:6 * c(1, 2), lag = 2))))),
+  isTRUE(all.equal(timestral_score(.fake_fc(lv, matrix(5, 1, 21), c(1, 4)),
+                                   6, period = 4)$scale, 3)))
+## user scales: a number, a function of the context
+stopifnot(isTRUE(all.equal(timestral_score(.fake_fc(lv, matrix(5, 1, 21)), 6,
+                                           scale = 2)$mase, 0.5)),
+          isTRUE(all.equal(timestral_score(.fake_fc(lv, matrix(5, 1, 21)), 6,
+                                           scale = function(x) max(x))$scale, 6)))
+## a constant context: NA scaled scores and a classed warning
+w <- tryCatch(timestral_score(.fake_fc(lv, matrix(5, 1, 21), rep(3, 5)), 6),
+              timestral_scale_warning = function(w) w)
+stopifnot(inherits(w, "timestral_scale_warning"), identical(w$labels, "S1"))
+sc <- suppressWarnings(timestral_score(.fake_fc(lv, matrix(5, 1, 21), rep(3, 5)), 6))
+stopifnot(is.na(sc$mase), !is.na(sc$ae))
+.expect_error(timestral_score(.fake_fc(lv, matrix(5, 1, 21)), 6, period = 0),
+              "period must")
+.expect_error(timestral_score(.fake_fc(lv, matrix(5, 1, 21)), 6, scale = 1:3),
+              "scale must be")
+.expect_error(timestral_score(.fake_fc(lv, matrix(5, 1, 21)), 6,
+                              scale = function(x) 1:2), "single number")
+## agrees with forecast::accuracy()'s MASE (seasonal-naive training scale)
+if (requireNamespace("forecast", quietly = TRUE)) {
+  train_s <- window(AirPassengers, end = c(1959, 12))
+  fc_s <- timestral_forecast(m, train_s, h = 12)
+  acc <- forecast::accuracy(timestral_as_forecast(fc_s),
+                            window(AirPassengers, start = c(1960, 1)))
+  stopifnot(isTRUE(all.equal(mean(timestral_score(fc_s, window(AirPassengers,
+                                                               start = c(1960, 1)))$mase),
+                             acc["Test set", "MASE"])))
+}
+## per series in a batch, per origin in a backtest (period from the ts),
+## each origin scaled by its own context only
+bt_s <- timestral_backtest(m, AirPassengers, h = 12, origins = c(96, 120))
+for (o in c(96, 120))
+  stopifnot(isTRUE(all.equal(unique(bt_s$scale[bt_s$origin == o]),
+                             mean(abs(diff(AirPassengers[1:o], lag = 12))))))
+bt_s2 <- timestral_backtest(m, list(a = ua, b = 10 * ub), h = 10, origins = 130,
+                            scale = c(1, 10))
+stopifnot(identical(unique(bt_s2$scale), c(1, 10)))
+bt_s3 <- timestral_backtest(m, as.numeric(AirPassengers), h = 12, origins = 120)
+stopifnot(isTRUE(all.equal(unique(bt_s3$scale),
+                           mean(abs(diff(AirPassengers[1:120]))))))
+## constant contexts warn once for the whole backtest
+n_warn <- 0L
+withCallingHandlers(
+  bt_c0 <- timestral_backtest(m, c(rep(5, 80), as.numeric(AirPassengers)[1:60]),
+                              h = 12, origins = c(60, 70, 100)),
+  warning = function(w) { n_warn <<- n_warn + 1L; invokeRestart("muffleWarning") })
+stopifnot(n_warn == 1L, sum(is.na(bt_c0$mase)) == 24L)

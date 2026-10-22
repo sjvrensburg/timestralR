@@ -4,7 +4,7 @@
 \alias{timestral_score}
 \title{Score quantile forecasts against realised values}
 \usage{
-timestral_score(fc, actual, level = c(80, 98))
+timestral_score(fc, actual, level = c(80, 98), period = NULL, scale = NULL)
 }
 \arguments{
 \item{fc}{a \code{timestral_forecast}}
@@ -16,11 +16,21 @@ variate), a matrix with time in rows (one series), a 3-D array
 
 \item{level}{interval levels in percent for the coverage columns
 (fractions in (0, 1) are taken as percentages)}
+
+\item{period}{seasonal period \eqn{m} of the default scale; \code{NULL}
+takes the frequency of a \code{ts} forecast and 1 otherwise. Set it for
+seasonal \code{zoo}, \code{xts} or plain input, which carry no period.}
+
+\item{scale}{\code{NULL} for the seasonal-naive scale, or your own: one
+positive number, one per series, a series-by-variate matrix, or a
+function of one context (a numeric vector, \code{NA} where missing)
+returning one number, such as
+\code{function(x) mean(abs(x), na.rm = TRUE)}}
 }
 \value{
 A data frame with columns \code{series}, \code{variate}, \code{step},
-\code{actual}, \code{median}, \code{pinball}, \code{crps}, \code{ae} and one \verb{cover<L>}
-column per level.
+\code{actual}, \code{median}, \code{pinball}, \code{crps}, \code{ae}, \code{scale}, \code{mase},
+\code{scaled_pinball}, \code{scaled_crps} and one \verb{cover<L>} column per level.
 }
 \description{
 Scores a \code{\link[=timestral_forecast]{timestral_forecast()}} against the values that were later
@@ -47,6 +57,20 @@ so for a point forecast it gives \eqn{0.98|q - y|} rather than
 each \code{level}; each level must pair two knots, as in \code{\link[=plot]{plot()}}.
 }
 
+The scaled scores divide \code{ae}, \code{pinball} and \code{crps} by a scale of the
+series, so they can be averaged across series of different magnitude:
+\code{mase} (averaged, the mean absolute scaled error of Hyndman and Koehler,
+2006), \code{scaled_pinball} and \code{scaled_crps}; the \code{scale} column holds the
+divisor. By default the scale is the in-sample mean absolute error of
+the seasonal naive forecast over the forecast's context,
+\eqn{\mathrm{mean}|y_t - y_{t-m}|} for the seasonal period \eqn{m}
+(\code{period}), over pairs of observed values from the first observed value
+on. A context with no more than \eqn{m} steps uses lag 1, as in the M4
+competition. In a backtest each origin is scaled by its own context, so
+the scale never uses values after the origin. A scale that is zero (a
+constant context) or cannot be computed gives \code{NA} scaled scores and a
+warning.
+
 Missing actual values give missing scores. Average the rows with
 \code{\link[stats:aggregate]{stats::aggregate()}} or dplyr to summarise by step, series or origin.
 }
@@ -55,7 +79,7 @@ m <- timestral_load(system.file("extdata", "tiny", package = "timestralR"))
 train <- window(AirPassengers, end = c(1959, 12))
 test <- window(AirPassengers, start = c(1960, 1))
 sc <- timestral_score(timestral_forecast(m, train, h = 12), test)
-colMeans(sc[, c("pinball", "crps", "ae", "cover80")])
+colMeans(sc[, c("pinball", "crps", "ae", "mase", "scaled_crps", "cover80")])
 }
 \seealso{
 \code{\link[=timestral_backtest]{timestral_backtest()}} to forecast and score from several

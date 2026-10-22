@@ -44,7 +44,8 @@ head(as_forecast_df(fc))                     # tidy long format (with time colum
 
 Inputs can be numeric vectors, `ts`/`mts`, `zoo`/`xts` (the time index
 is kept), matrices or data frames with time in rows, or a list of series
-forecast as a batch. Columns of a series are forecast jointly; `NA`
+forecast as a batch (series may differ in length; they are aligned at
+the end). Columns of a series are forecast jointly; `NA`
 marks missing values, and `observation_mask` can mark more.
 
 ```r
@@ -106,6 +107,7 @@ timestral_supports_known_covariates(m)               # can it use known-future c
 bt <- timestral_backtest(m, AirPassengers, h = 12,       # forecast from each origin,
                          origins = seq(72, 132, by = 12)) # score against what followed
 aggregate(cbind(ae, pinball, crps, cover80) ~ step, data = bt, FUN = mean)
+aggregate(cbind(mase, scaled_crps) ~ origin, data = bt, FUN = mean) # scale-free
 timestral_score(fc, actual)                          # score a single forecast
 ```
 
