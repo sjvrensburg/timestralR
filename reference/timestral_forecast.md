@@ -15,7 +15,8 @@ timestral_forecast(
   categorical_past_covariates = NULL,
   categorical_known_covariates = NULL,
   symmetric = TRUE,
-  clip_nonnegative = TRUE
+  clip_nonnegative = TRUE,
+  rollout = c("median", "quantile_paths")
 )
 ```
 
@@ -81,7 +82,14 @@ timestral_forecast(
 
 - clip_nonnegative:
 
-  clip at 0 when every observed target value is \>= 0
+  clip at 0 when every observed target value is \>= 0; turn it off for a
+  series that may fall below zero later on
+
+- rollout:
+
+  how a horizon longer than one decode block is rolled out: `"median"`
+  (the default, as upstream) or `"quantile_paths"`. See the section on
+  long horizons below.
 
 ## Value
 
@@ -90,6 +98,34 @@ horizon, level) array; for a batch, (series, variate, horizon, level).
 Also holds the `observed` context values (with NA for missing), and the
 context `index` and `future_index` when `y` carried a time index (`ts`,
 `zoo`, `xts`); the future index extends the last observed interval.
+
+## Long horizons
+
+The model decodes up to one block per forward pass, 1024 steps with the
+official checkpoints and the default `per_shot_horizon_patches`. Beyond
+that, `rollout = "median"` feeds each block's median back as if it had
+been observed, so the next block forgets the uncertainty built up so far
+and the intervals become far too narrow. The medians remain usable, but
+do not rely on the intervals past the first block.
+
+`rollout = "quantile_paths"` keeps the uncertainty: each of the nine
+deciles of a block seeds its own copy of the context, and the forecasts
+from all copies are mixed into the next block's quantiles. It widens the
+intervals without retraining, and mostly leaves the median alone. In
+simulations at `h = 4096` from 512 steps of context, it brought the
+coverage of the 80% interval in the last block on a random walk back to
+55-76%, depending on the checkpoint (from 1-2%), and cut the pinball
+loss by 14-25%.
+
+Use it for series that wander. On a stationary or nearly deterministic
+series the intervals become too wide instead, and paths do not correct a
+median that has missed a trend. Keep the default
+`per_shot_horizon_patches`: with shorter blocks the intervals collapse
+again, at a higher cost. Each block after the first costs a forward pass
+over nine times the rows, which took about 6 to 15 times as long overall
+in those simulations. Forecasts within one block are the same under both
+rollouts. This rollout is not part of upstream `timestral`, so it has no
+official outputs to check against; the scheme comes from Chronos-2.
 
 ## Examples
 

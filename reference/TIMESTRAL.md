@@ -13,7 +13,14 @@ distributions.
 ## Usage
 
 ``` r
-TIMESTRAL(formula, model, symmetric = TRUE, clip_nonnegative = TRUE, ...)
+TIMESTRAL(
+  formula,
+  model,
+  symmetric = TRUE,
+  clip_nonnegative = TRUE,
+  rollout = c("median", "quantile_paths"),
+  ...
+)
 ```
 
 ## Arguments
@@ -32,7 +39,7 @@ TIMESTRAL(formula, model, symmetric = TRUE, clip_nonnegative = TRUE, ...)
   mable stays small when saved and is reloaded from disk when forecast
   in a new R session or a parallel worker.
 
-- symmetric, clip_nonnegative:
+- symmetric, clip_nonnegative, rollout:
 
   as in
   [`timestral_forecast()`](https://sjvrensburg.github.io/timestralR/reference/timestral_forecast.md)

@@ -59,7 +59,7 @@ timestral_backtest(
   arguments to
   [`timestral_forecast()`](https://sjvrensburg.github.io/timestralR/reference/timestral_forecast.md):
   `observation_mask`, covariates (over the whole series), `symmetric`,
-  `clip_nonnegative`
+  `clip_nonnegative`, `rollout`
 
 - level:
 

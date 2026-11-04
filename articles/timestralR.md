@@ -694,7 +694,7 @@ and the training data, is a fraction of the size of the weights:
 c(mable_MB   = length(serialize(fit, NULL)) / 1e6,
   weights_MB = file.size(file.path(m$dir, "model.safetensors")) / 1e6)
 #>   mable_MB weights_MB 
-#>      1.255    111.296
+#>      1.256    111.296
 ```
 
 ### The forecast package
@@ -865,7 +865,10 @@ The main options of
 - `symmetric = TRUE` (default) averages the forecast with that of the
   mirrored series (`-y`), which removes sign bias;
 - `clip_nonnegative = TRUE` (default) clips quantiles at zero when every
-  observed value is non-negative.
+  observed value is non-negative, so turn it off for a series that may
+  fall below zero later on;
+- `rollout = "median"` (default) sets how horizons longer than one
+  decode block are rolled out (see “Long horizons” below).
 
 [`timestral_load()`](https://sjvrensburg.github.io/timestralR/reference/timestral_load.md)
 controls the decoding:
@@ -876,6 +879,47 @@ controls the decoding:
   per block before the median is fed back for long horizons;
 - `quantile_real_cap_k` and `extreme_value_threshold` are safety clamps
   for extreme inputs.
+
+### Long horizons
+
+The model decodes up to 1024 steps per forward pass. By default, longer
+horizons feed each block’s median back as if it had been observed. The
+medians remain usable, but the next block forgets the uncertainty built
+up so far, so the intervals past the first block are far too narrow.
+
+`rollout = "quantile_paths"` keeps that uncertainty by rolling out each
+of the nine deciles in its own copy of the context and mixing the
+results. Here is how often the 80% interval contains the truth on
+simulated random walks, for the first 1024 steps and the next 1024:
+
+``` r
+
+set.seed(1)
+walks <- replicate(8, cumsum(rnorm(512 + 2048)), simplify = FALSE)
+context <- lapply(walks, function(w) w[1:512])
+future <- t(sapply(walks, function(w) w[512 + 1:2048]))
+
+coverage <- function(rollout) {
+  fc <- timestral_forecast(m, context, h = 2048, rollout = rollout,
+                           clip_nonnegative = FALSE)
+  lo <- fc$quantiles[, 1, , "0.10"]
+  hi <- fc$quantiles[, 1, , "0.90"]
+  inside <- future >= lo & future <= hi
+  c(first = mean(inside[, 1:1024]), second = mean(inside[, 1025:2048]))
+}
+rbind(median = coverage("median"),
+      quantile_paths = coverage("quantile_paths"))
+#>                first  second
+#> median          0.75 0.06262
+#> quantile_paths  0.75 0.66919
+```
+
+Use it for series that wander. On stationary or nearly deterministic
+series its intervals are too wide instead, and it does not correct a
+median that has missed a trend. It took about 6 to 15 times as long in
+our simulations, and it needs the default `per_shot_horizon_patches`:
+with shorter blocks the intervals collapse again. It is not part of
+upstream `timestral`; the scheme comes from Chronos-2.
 
 ### Backends
 
@@ -897,7 +941,7 @@ timing <- function(model) median(replicate(3, system.time(
   timestral_forecast(model, AirPassengers, h = 36))[["elapsed"]]))
 c(native = timing(m), R = timing(m_R))
 #> native      R 
-#>  0.043  0.092
+#>  0.044  0.090
 ```
 
 ### Parallel use
