@@ -287,7 +287,8 @@ timestral_score <- function(fc, actual, level = c(80, 98), period = NULL,
 #' @param initial the first origin; `NULL` for the last five origins
 #' @param step spacing of the origins in time steps
 #' @param ... arguments to [timestral_forecast()]: `observation_mask`,
-#'   covariates (over the whole series), `symmetric`, `clip_nonnegative`
+#'   covariates (over the whole series), `symmetric`, `clip_nonnegative`,
+#'   `rollout`
 #' @param level interval levels in percent for the coverage columns
 #' @param period,scale the scale of the scaled scores, as in
 #'   [timestral_score()]; `NULL` `period` takes the frequency of a `ts`
@@ -332,7 +333,7 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
   args <- args[!vapply(args, is.null, logical(1))]
   allowed <- c("observation_mask", "past_covariates", "known_covariates",
                "categorical_past_covariates", "categorical_known_covariates",
-               "symmetric", "clip_nonnegative")
+               "symmetric", "clip_nonnegative", "rollout")
   if (length(args) && (is.null(names(args)) || any(!nzchar(names(args)))))
     stop("arguments in `...` must be named")
   bad <- setdiff(names(args), allowed)
@@ -386,7 +387,7 @@ timestral_backtest <- function(model, y, h, origins = NULL, initial = NULL,
            max(origins), ") needs ", need,
            if (nm %in% known_names) " (context plus horizon)")
   }
-  opts <- args[intersect(names(args), c("symmetric", "clip_nonnegative"))]
+  opts <- args[intersect(names(args), c("symmetric", "clip_nonnegative", "rollout"))]
   ## check every origin up front, so no completed work is lost to a late
   ## failure: each series needs an observed value by the first origin
   observed <- is.finite(arr)

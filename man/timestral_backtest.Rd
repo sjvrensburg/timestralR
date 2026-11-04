@@ -36,7 +36,8 @@ step); overrides \code{initial} and \code{step}}
 \item{step}{spacing of the origins in time steps}
 
 \item{...}{arguments to \code{\link[=timestral_forecast]{timestral_forecast()}}: \code{observation_mask},
-covariates (over the whole series), \code{symmetric}, \code{clip_nonnegative}}
+covariates (over the whole series), \code{symmetric}, \code{clip_nonnegative},
+\code{rollout}}
 
 \item{level}{interval levels in percent for the coverage columns}
 
