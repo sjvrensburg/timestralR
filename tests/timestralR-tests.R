@@ -24,6 +24,7 @@ stopifnot(dir.exists(file.path(.test_dir, "parts")))
 .part("02-forecast-core.R")
 .part("03-regressions.R")
 .part("03b-backtest.R")
+.part("03c-rollout.R")
 
 .optional_pkgs <- c("zoo", "xts", "tsibble", "ggplot2", "fable",
                     "fabletools", "distributional", "forecast")

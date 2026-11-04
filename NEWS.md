@@ -1,5 +1,18 @@
 # timestralR (development version)
 
+- `timestral_forecast()` gains `rollout`. Past the first decode block
+  (1024 steps by default), the default `"median"` feeds each block's
+  median back as if observed, which makes the intervals far too narrow.
+  `"quantile_paths"` keeps the uncertainty by rolling out each decile in
+  its own copy of the context and mixing the results, the scheme of
+  Chronos-2. It suits series that wander: on simulated random walks the
+  80% interval in the last of four blocks covers 55-76% of the truth,
+  against 1-2%, and the pinball loss falls by 14-25%. On stationary or
+  nearly deterministic series its intervals are too wide. It costs about
+  6 to 15 times the run time and has no upstream counterpart. The default
+  is unchanged. `predict()`, `forecast()`, `timestral_backtest()` and
+  `TIMESTRAL()` accept it too.
+
 - `timestral_score()` and `timestral_backtest()` add scaled scores that
   can be averaged across series: `mase`, `scaled_pinball` and
   `scaled_crps` divide `ae`, `pinball` and `crps` by the in-sample mean

@@ -30,5 +30,23 @@ if (!nzchar(model_dir)) {
   stopifnot(identical(dim(fcr$quantiles), c(1L, 50L, 21L)))
   stopifnot(mean(abs(fcr$quantiles[1, , "0.50"] -
                      (10 + 3 * sin(2 * pi * (601:650) / 24)))) < 0.5)
+  ## long horizons: on random walks, median feedback collapses the 80% band
+  ## past the first block and quantile paths keep it. Thresholds well inside
+  ## the measured values on 5M, 28M and 209M.
+  set.seed(42)
+  walks <- replicate(4, cumsum(rnorm(512 + 2048)), simplify = FALSE)
+  ctx <- lapply(walks, function(w) w[1:512])
+  fut <- t(vapply(walks, function(w) w[512 + 1:2048], numeric(2048)))
+  later <- 1025:2048
+  cov80 <- function(q) {
+    i <- which.min(abs(mr$config$quantile_knots - 0.1))
+    j <- which.min(abs(mr$config$quantile_knots - 0.9))
+    mean(fut[, later] >= q[, 1, later, i] & fut[, later] <= q[, 1, later, j])
+  }
+  ql_med <- timestral_forecast(mr, ctx, h = 2048, clip_nonnegative = FALSE)$quantiles
+  ql_pth <- timestral_forecast(mr, ctx, h = 2048, clip_nonnegative = FALSE,
+                               rollout = "quantile_paths")$quantiles
+  stopifnot(cov80(ql_med) < 0.35, cov80(ql_pth) > 0.5,
+            max(abs(ql_med[, , 1:1024, ] - ql_pth[, , 1:1024, ])) < 1e-9)
   cat("full-checkpoint tests passed\n")
 }

@@ -74,6 +74,25 @@ if (requireNamespace("fable", quietly = TRUE) &&
   stopifnot(fabletools::is_fable(fcf), all(is.finite(fcf$.mean)))
   fb <- fabletools::as_fable(timestral_forecast(m, y_ts, h = 6))
   stopifnot(fabletools::is_fable(fb))
+  ## rollout reaches the forecast (one patch per block, so 3 patches span 3
+  ## blocks); a model fitted before the argument existed has none: median
+  m_blk <- timestral_load(tiny, max_context = 4096L, per_shot_horizon_patches = 1L)
+  h_blk <- 3L * m_blk$config$patch_size
+  fit_blk <- fabletools::model(
+    train_ts, med = TIMESTRAL(value, model = m_blk),
+    paths = TIMESTRAL(value, model = m_blk, rollout = "quantile_paths"))
+  f_blk <- as.data.frame(fabletools::forecast(fit_blk, h = h_blk))
+  md_med <- f_blk$.mean[f_blk$.model == "med"]
+  md_paths <- f_blk$.mean[f_blk$.model == "paths"]
+  stopifnot(max(abs(md_med - md_paths)) > 1e-9)
+  old_fit <- fit_blk$med[[1]]$fit
+  old_fit$rollout <- NULL
+  f_old <- timestralR:::forecast.model_timestral(old_fit,
+                                                 data.frame(i = seq_len(h_blk)))
+  stopifnot(max(abs(as.numeric(mean(f_old)) - md_med)) < 1e-9)
+  ok_ro <- tryCatch({TIMESTRAL(value, model = m_blk, rollout = "nope"); FALSE},
+                    error = function(e) TRUE)
+  stopifnot(ok_ro)
 }
 ## tidyverts regressions: ts index column and class, index named "time",
 ## logical tsibble masks, implicit gaps, key-matched tsibble covariates,

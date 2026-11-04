@@ -30,7 +30,8 @@
   model
 }
 
-.train_timestral <- function(.data, handle, symmetric, clip_nonnegative) {
+.train_timestral <- function(.data, handle, symmetric, clip_nonnegative,
+                             rollout = "median") {
   vars <- tsibble::measured_vars(.data)
   if (length(vars) != 1L)
     stop("the TIMESTRAL fable model supports a single (univariate) ",
@@ -39,6 +40,7 @@
   y <- as.numeric(.data[[vars]])[order(.data[[tsibble::index_var(.data)]])]
   structure(list(handle = handle, var = vars, context = y,
                  symmetric = symmetric, clip_nonnegative = clip_nonnegative,
+                 rollout = rollout,
                  nobs = sum(is.finite(y))),
             class = "model_timestral")
 }
@@ -60,7 +62,7 @@
 #'   checkpoint directory and load settings, not the weights, so a mable
 #'   stays small when saved and is reloaded from disk when forecast in a
 #'   new R session or a parallel worker.
-#' @param symmetric,clip_nonnegative as in [timestral_forecast()]
+#' @param symmetric,clip_nonnegative,rollout as in [timestral_forecast()]
 #' @param ... passed to the model definition (currently unused)
 #' @return a fable model definition, for use inside `fabletools::model()`
 #' @examples
@@ -74,14 +76,16 @@
 #' }
 #' @export
 TIMESTRAL <- function(formula, model, symmetric = TRUE,
-                      clip_nonnegative = TRUE, ...) {
+                      clip_nonnegative = TRUE,
+                      rollout = c("median", "quantile_paths"), ...) {
   if (!requireNamespace("fabletools", quietly = TRUE))
     stop("the TIMESTRAL fable model requires the fabletools package")
   if (missing(model) || !inherits(model, "timestral_model"))
     stop("`model` must be a timestral_model from timestral_load()")
+  rollout <- match.arg(rollout)
   handle <- .model_handle(model)
   assign(handle$key, model, envir = .model_cache)
-  train_fn <- .timestral_train_fn(handle, symmetric, clip_nonnegative)
+  train_fn <- .timestral_train_fn(handle, symmetric, clip_nonnegative, rollout)
   ## fabletools keeps this frame as the model environment; drop the
   ## model so it is not serialised into every fitted model
   rm(model)
@@ -92,10 +96,10 @@ TIMESTRAL <- function(formula, model, symmetric = TRUE,
 
 ## Built in its own frame so the training closure captures only the
 ## handle, never the model.
-.timestral_train_fn <- function(handle, symmetric, clip_nonnegative) {
-  force(handle); force(symmetric); force(clip_nonnegative)
+.timestral_train_fn <- function(handle, symmetric, clip_nonnegative, rollout) {
+  force(handle); force(symmetric); force(clip_nonnegative); force(rollout)
   function(.data, specials, ...)
-    .train_timestral(.data, handle, symmetric, clip_nonnegative)
+    .train_timestral(.data, handle, symmetric, clip_nonnegative, rollout)
 }
 
 ## Registered for fabletools::forecast when fabletools is loaded.
@@ -108,7 +112,9 @@ forecast.model_timestral <- function(object, new_data, specials = NULL,
   fc <- timestral_forecast(.model_from_handle(object$handle),
                            object$context, h = h,
                            symmetric = object$symmetric,
-                           clip_nonnegative = object$clip_nonnegative)
+                           clip_nonnegative = object$clip_nonnegative,
+                           ## NULL in a mable saved before this argument: median
+                           rollout = object$rollout)
   q <- matrix(fc$quantiles[1, , ], nrow = h)
   ## levels passed by position: the argument is `p` in older
   ## distributional releases and `quantile` in newer ones

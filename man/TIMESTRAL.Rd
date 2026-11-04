@@ -4,7 +4,14 @@
 \alias{TIMESTRAL}
 \title{Timestral as a fable model}
 \usage{
-TIMESTRAL(formula, model, symmetric = TRUE, clip_nonnegative = TRUE, ...)
+TIMESTRAL(
+  formula,
+  model,
+  symmetric = TRUE,
+  clip_nonnegative = TRUE,
+  rollout = c("median", "quantile_paths"),
+  ...
+)
 }
 \arguments{
 \item{formula}{the response formula, as in other fable models, e.g.
@@ -16,7 +23,7 @@ checkpoint directory and load settings, not the weights, so a mable
 stays small when saved and is reloaded from disk when forecast in a
 new R session or a parallel worker.}
 
-\item{symmetric, clip_nonnegative}{as in \code{\link[=timestral_forecast]{timestral_forecast()}}}
+\item{symmetric, clip_nonnegative, rollout}{as in \code{\link[=timestral_forecast]{timestral_forecast()}}}
 
 \item{...}{passed to the model definition (currently unused)}
 }
